@@ -11,9 +11,9 @@ def load_project_data(data_dir="..\\data"):
     y_train_path = os.path.join(data_dir, "y_train.txt")
     x_test_path = os.path.join(data_dir, "x_test.txt")
     
-    X_train = pd.read_csv(x_train_path, sep='\t')
-    y_train = pd.read_csv(y_train_path, sep='\t')
-    X_test = pd.read_csv(x_test_path, sep='\t')
+    X_train = pd.read_csv(x_train_path, sep='\\s+')
+    y_train = pd.read_csv(y_train_path, sep='\\s+')
+    X_test = pd.read_csv(x_test_path, sep='\\s+')
     logger.info(f"Data loaded. X_train: {X_train.shape}, y_train: {y_train.shape}, X_test: {X_test.shape}")
     
     return X_train, y_train, X_test
