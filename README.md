@@ -8,8 +8,8 @@ In modern marketing, sending unsolicited offers to uninterested clients creates 
 2. **Targeting Efficiency:** The campaign is limited to exactly 1,000 customers. The model must precisely rank customers by their probability of conversion.
 
 ## Team:
-* Anna Ostrowska
-* Gabriela Majstrak
-* Igor Lechoszest
+* [Anna Ostrowska](https://github.com/annaostrowska03)
+* [Gabriela Majstrak](https://github.com/GabrielaMajstrak)
+* [Igor Lechoszest](https://github.com/IgorLechoszest)
 
 *This project was created as part of the Advanced Machine Learning course (Data Science @ WUT)
