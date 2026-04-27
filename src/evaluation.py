@@ -36,7 +36,8 @@ def calculate_profit(y_true, y_pred_proba, threshold=0.333, num_vars=0, debug=Fa
     Where:
     TP (True Positives) - selected customers who took the offer
     FP (False Positives) - selected customers who did not take the offer
-    max 1000 offers can be sent. In the case of higher number of indexes, only first 1000 ids are assessed. 
+    max 1000 offers can be sent. If more customers pass the threshold,
+    top probabilities are selected up to `max_offers`.
     """
     y_true = np.array(y_true).ravel()
     y_pred_proba = np.array(y_pred_proba).ravel()

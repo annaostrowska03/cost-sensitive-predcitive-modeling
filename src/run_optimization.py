@@ -35,7 +35,12 @@ def tune_hgb_for_profit(X, y, threshold=PROFIT_THRESHOLD, max_offers=MAX_OFFERS,
         "l2_regularization": [0.0, 0.1, 0.5, 1.0],
     }
 
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
+    min_class_count = int(y.value_counts().min())
+    n_splits = min(5, min_class_count)
+    if n_splits < 2:
+        raise ValueError("At least two observations per class are required for CV-based tuning.")
+
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     sampled_params = list(ParameterSampler(param_space, n_iter=n_iter, random_state=random_state))
 
     best_params = None
@@ -65,14 +70,14 @@ def tune_hgb_for_profit(X, y, threshold=PROFIT_THRESHOLD, max_offers=MAX_OFFERS,
     logger.info(f"Best tuning result: CV profit={best_profit:,.0f} | params={best_params}")
     return best_params, best_profit
 
-def build_calibrated_model(base_model):
+def build_calibrated_model(base_model, cv_splits=5):
     """
     Compatibility helper for sklearn versions using either `estimator` or `base_estimator`.
     """
     try:
-        return CalibratedClassifierCV(estimator=base_model, method="sigmoid", cv=5)
+        return CalibratedClassifierCV(estimator=base_model, method="sigmoid", cv=cv_splits)
     except TypeError:
-        return CalibratedClassifierCV(base_estimator=base_model, method="sigmoid", cv=5)
+        return CalibratedClassifierCV(base_estimator=base_model, method="sigmoid", cv=cv_splits)
 
 def main():
     """
@@ -120,8 +125,13 @@ def main():
 
     logger.info(f"Profit-tuned CV estimate (before calibration): {tuned_cv_profit:,.0f} EUR")
     base_model = HistGradientBoostingClassifier(random_state=42, **best_params)
-    final_model = build_calibrated_model(base_model)
-    final_model.fit(X_train_final, y)
+    calibration_cv = min(5, int(y.value_counts().min()))
+    if calibration_cv >= 2:
+        final_model = build_calibrated_model(base_model, cv_splits=calibration_cv)
+        final_model.fit(X_train_final, y)
+    else:
+        logger.warning("Not enough positive/negative examples for calibration CV. Falling back to uncalibrated model.")
+        final_model = base_model.fit(X_train_final, y)
     
     y_test_pred_proba = final_model.predict_proba(X_test_final)[:, 1]
 
