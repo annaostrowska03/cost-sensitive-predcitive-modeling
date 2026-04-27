@@ -3,11 +3,14 @@ import os
 import sys
 import pandas as pd
 import numpy as np
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.model_selection import ParameterSampler, StratifiedKFold
 from src.visualization import plot_learning_curve
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from src.data_loader import load_project_data
 from src.feature_selection import ProfitDrivenFeatureSelector
+from src.evaluation import calculate_profit, select_offer_indices
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,6 +18,61 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S"
 )
 logger = logging.getLogger(__name__)
+
+PROFIT_THRESHOLD = 1.0 / 3.0
+MAX_OFFERS = 1000
+
+def tune_hgb_for_profit(X, y, threshold=PROFIT_THRESHOLD, max_offers=MAX_OFFERS, random_state=42, n_iter=20):
+    """
+    Lightweight randomized tuning of HistGradientBoosting hyperparameters
+    directly against campaign profit.
+    """
+    param_space = {
+        "learning_rate": np.linspace(0.02, 0.2, 10),
+        "max_leaf_nodes": [15, 31, 63, 127],
+        "min_samples_leaf": [5, 10, 20, 40, 80],
+        "max_iter": [100, 150, 200, 300],
+        "l2_regularization": [0.0, 0.1, 0.5, 1.0],
+    }
+
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
+    sampled_params = list(ParameterSampler(param_space, n_iter=n_iter, random_state=random_state))
+
+    best_params = None
+    best_profit = -np.inf
+
+    for i, params in enumerate(sampled_params, start=1):
+        oof_pred_proba = np.zeros(len(y), dtype=float)
+
+        for train_idx, valid_idx in cv.split(X, y):
+            model = HistGradientBoostingClassifier(random_state=random_state, **params)
+            model.fit(X.iloc[train_idx], y.iloc[train_idx])
+            oof_pred_proba[valid_idx] = model.predict_proba(X.iloc[valid_idx])[:, 1]
+
+        fold_profit = calculate_profit(
+            y_true=y,
+            y_pred_proba=oof_pred_proba,
+            threshold=threshold,
+            num_vars=0,
+            max_offers=max_offers,
+        )
+        logger.info(f"[Tuning {i:02d}/{len(sampled_params)}] CV profit={fold_profit:,.0f} | params={params}")
+
+        if fold_profit > best_profit:
+            best_profit = fold_profit
+            best_params = params
+
+    logger.info(f"Best tuning result: CV profit={best_profit:,.0f} | params={best_params}")
+    return best_params, best_profit
+
+def build_calibrated_model(base_model):
+    """
+    Compatibility helper for sklearn versions using either `estimator` or `base_estimator`.
+    """
+    try:
+        return CalibratedClassifierCV(estimator=base_model, method="sigmoid", cv=5)
+    except TypeError:
+        return CalibratedClassifierCV(base_estimator=base_model, method="sigmoid", cv=5)
 
 def main():
     """
@@ -33,7 +91,7 @@ def main():
         filter_top_n=50, 
         embedded_target_n=15, 
         feature_cost=200, 
-        max_offers=1000
+        max_offers=MAX_OFFERS
     )
     
     selector.fit(X_train, y)
@@ -48,14 +106,33 @@ def main():
         
     logger.info(f"Training final Model utilizing: {final_features}")
 
-    final_model = HistGradientBoostingClassifier(random_state=42, max_iter=200)
-    final_model.fit(X_train[final_features], y)
-    
-    y_test_pred_proba = final_model.predict_proba(X_test[final_features])[:, 1]
+    X_train_final = X_train[final_features]
+    X_test_final = X_test[final_features]
 
-    top_indices = np.argsort(y_test_pred_proba)[::-1][:1000]
+    best_params, tuned_cv_profit = tune_hgb_for_profit(
+        X_train_final,
+        y,
+        threshold=PROFIT_THRESHOLD,
+        max_offers=MAX_OFFERS,
+        random_state=42,
+        n_iter=20,
+    )
+
+    logger.info(f"Profit-tuned CV estimate (before calibration): {tuned_cv_profit:,.0f} EUR")
+    base_model = HistGradientBoostingClassifier(random_state=42, **best_params)
+    final_model = build_calibrated_model(base_model)
+    final_model.fit(X_train_final, y)
+    
+    y_test_pred_proba = final_model.predict_proba(X_test_final)[:, 1]
+
+    top_indices = select_offer_indices(
+        y_pred_proba=y_test_pred_proba,
+        threshold=PROFIT_THRESHOLD,
+        max_offers=MAX_OFFERS,
+    )
 
     submission_indices = top_indices + 1
+    logger.info(f"Selected {len(submission_indices)} profitable customers (max allowed: {MAX_OFFERS}).")
 
     raw_var_indices = [int(f.replace('V', '')) for f in final_features] if all(f.startswith('V') for f in final_features) else final_features
 

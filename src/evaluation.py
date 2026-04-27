@@ -1,5 +1,25 @@
 import numpy as np
 
+def select_offer_indices(y_pred_proba, threshold=0.333, max_offers=1000):
+    """
+    Selects campaign recipients using business-aware ranking:
+    1) keep only probabilities above threshold,
+    2) rank remaining customers by probability (descending),
+    3) keep at most `max_offers`.
+    """
+    y_pred_proba = np.array(y_pred_proba).ravel()
+
+    if max_offers <= 0:
+        return np.array([], dtype=int)
+
+    eligible_indices = np.where(y_pred_proba > threshold)[0]
+    if len(eligible_indices) == 0:
+        return np.array([], dtype=int)
+
+    sorted_relative = np.argsort(y_pred_proba[eligible_indices])[::-1]
+    ranked_eligible = eligible_indices[sorted_relative]
+    return ranked_eligible[:max_offers]
+
 def calculate_profit(y_true, y_pred_proba, threshold=0.333, num_vars=0, debug=False, max_offers=1000):
     """
     Calculates the business profit (in EUR) for the marketing campaign.
@@ -20,11 +40,12 @@ def calculate_profit(y_true, y_pred_proba, threshold=0.333, num_vars=0, debug=Fa
     """
     y_true = np.array(y_true).ravel()
     y_pred_proba = np.array(y_pred_proba).ravel()
-    
-    eligible_indices = np.where(y_pred_proba > threshold)[0]
-    
-    # Business constraint: sending offer to max 1000 people
-    selected_indices = eligible_indices[:1000] if len(eligible_indices) > 1000 else eligible_indices
+
+    selected_indices = select_offer_indices(
+        y_pred_proba=y_pred_proba,
+        threshold=threshold,
+        max_offers=max_offers,
+    )
 
     if len(selected_indices) == 0:
         TP, FP = 0, 0
