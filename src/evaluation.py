@@ -1,6 +1,6 @@
 import numpy as np
 
-def calculate_profit(y_true, y_pred_proba, threshold=0.333, num_vars=0, debug=False):
+def calculate_profit(y_true, y_pred_proba, threshold=0.333, num_vars=0, debug=False, max_offers=1000):
     """
     Calculates the business profit (in EUR) for the marketing campaign.
     
