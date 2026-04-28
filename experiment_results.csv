@@ -1,0 +1,4 @@
+name,profit,features,params
+"Exp 1: Standard (Filter 50, Embedded 15, Corr 0.85)",6070,"['V160', 'V11', 'V191', 'V342', 'V380', 'V215']","{'min_samples_leaf': 5, 'max_leaf_nodes': 15, 'max_iter': 300, 'learning_rate': np.float64(0.02), 'l2_regularization': 0.1}"
+"Exp 2: Wide Net (Filter 100, Embedded 30, Corr 0.90)",5440,"['V224', 'V160', 'V390']","{'min_samples_leaf': 5, 'max_leaf_nodes': 15, 'max_iter': 300, 'learning_rate': np.float64(0.02), 'l2_regularization': 0.1}"
+"Exp 3: Strict Net (Filter 30, Embedded 10, Corr 0.80)",6070,"['V160', 'V11', 'V191', 'V342', 'V380', 'V215']","{'min_samples_leaf': 5, 'max_leaf_nodes': 15, 'max_iter': 300, 'learning_rate': np.float64(0.02), 'l2_regularization': 0.1}"
