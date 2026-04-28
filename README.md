@@ -27,6 +27,10 @@ Additional standalone approaches are available in separate scripts:
    Approach: free interaction features (`PolynomialFeatures`) and model selection under profit metric.
    Output files: `{TEAM_NAME}_interactions_obs.txt`, `{TEAM_NAME}_interactions_vars.txt`
 
+4. `python -m src.run_optimization_rf_only`
+   Approach: Random Forest-only pipeline with hyperparameter tuning and threshold optimization directly for profit.
+   Output files: `{TEAM_NAME}_rf_only_obs.txt`, `{TEAM_NAME}_rf_only_vars.txt`
+
 You can set a team prefix before running:
 `$env:TEAM_NAME="123456_98765_98764"` (PowerShell)
 
