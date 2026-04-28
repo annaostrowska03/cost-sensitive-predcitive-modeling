@@ -27,8 +27,10 @@ TEAM_NAME = os.getenv("TEAM_NAME", "ids")
 FAST_MODE = os.getenv("CSM_FAST_MODE", "0") == "1"
 FILTER_TOP_N = int(os.getenv("CSM_FILTER_TOP_N", "35" if FAST_MODE else "45"))
 EMBEDDED_TARGET_N = int(os.getenv("CSM_EMBEDDED_TARGET_N", "10" if FAST_MODE else "12"))
-THRESHOLD_GRID_SIZE = int(os.getenv("CSM_THRESHOLD_GRID_SIZE", "15" if FAST_MODE else "31"))
-THRESHOLD_GRID = np.linspace(0.20, 0.70, THRESHOLD_GRID_SIZE)
+THRESHOLD_MIN = float(os.getenv("CSM_THRESHOLD_MIN", "0.05"))
+THRESHOLD_MAX = float(os.getenv("CSM_THRESHOLD_MAX", "0.45"))
+THRESHOLD_GRID_SIZE = int(os.getenv("CSM_THRESHOLD_GRID_SIZE", "21" if FAST_MODE else "41"))
+THRESHOLD_GRID = np.linspace(THRESHOLD_MIN, THRESHOLD_MAX, THRESHOLD_GRID_SIZE)
 PCA_COMPONENTS = int(os.getenv("CSM_PCA_COMPONENTS", "2"))
 CLUSTER_COUNT = int(os.getenv("CSM_CLUSTER_COUNT", "4"))
 
@@ -140,8 +142,10 @@ def main():
     """
     logger.info("Running interaction-feature approach...")
     logger.info(
-        "Runtime config | fast_mode=%s | threshold_grid=%d | pca_components=%d | clusters=%d",
+        "Runtime config | fast_mode=%s | threshold_range=[%0.3f, %0.3f] | threshold_grid=%d | pca_components=%d | clusters=%d",
         FAST_MODE,
+        THRESHOLD_MIN,
+        THRESHOLD_MAX,
         THRESHOLD_GRID_SIZE,
         PCA_COMPONENTS,
         CLUSTER_COUNT,
