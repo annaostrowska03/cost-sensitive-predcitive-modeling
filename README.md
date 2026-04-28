@@ -31,6 +31,10 @@ Additional standalone approaches are available in separate scripts:
    Approach: Random Forest-only pipeline with hyperparameter tuning and threshold optimization directly for profit.
    Output files: `{TEAM_NAME}_rf_only_obs.txt`, `{TEAM_NAME}_rf_only_vars.txt`
 
+5. `python -m src.run_optimization_max_profit`
+   Approach: aggressive profit search on free engineered features with model zoo comparison and weighted pair blends optimized for the final top-1000 ranking.
+   Output files: `{TEAM_NAME}_max_profit_obs.txt`, `{TEAM_NAME}_max_profit_vars.txt`
+
 You can set a team prefix before running:
 `$env:TEAM_NAME="123456_98765_98764"` (PowerShell)
 
