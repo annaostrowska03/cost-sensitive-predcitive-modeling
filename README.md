@@ -24,7 +24,7 @@ Additional standalone approaches are available in separate scripts:
    Output files: `{TEAM_NAME}_ensemble_obs.txt`, `{TEAM_NAME}_ensemble_vars.txt`
 
 3. `python -m src.run_optimization_interactions`
-   Approach: free interaction features (`PolynomialFeatures`) and model selection under profit metric.
+   Approach: free feature engineering on purchased variables (`products`, `ratios`, `signed logs`, `row statistics`, `PCA`, `KMeans`) and model selection under the profit metric.
    Output files: `{TEAM_NAME}_interactions_obs.txt`, `{TEAM_NAME}_interactions_vars.txt`
 
 4. `python -m src.run_optimization_rf_only`

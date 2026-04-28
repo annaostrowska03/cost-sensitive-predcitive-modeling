@@ -3,16 +3,17 @@ import os
 import sys
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+from sklearn.preprocessing import StandardScaler
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from src.data_loader import load_project_data
 from src.evaluation import calculate_profit, select_offer_indices
 from src.feature_selection import ProfitDrivenFeatureSelector
+from src.free_feature_engineering import build_free_engineered_features
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,6 +29,8 @@ FILTER_TOP_N = int(os.getenv("CSM_FILTER_TOP_N", "35" if FAST_MODE else "45"))
 EMBEDDED_TARGET_N = int(os.getenv("CSM_EMBEDDED_TARGET_N", "10" if FAST_MODE else "12"))
 THRESHOLD_GRID_SIZE = int(os.getenv("CSM_THRESHOLD_GRID_SIZE", "15" if FAST_MODE else "31"))
 THRESHOLD_GRID = np.linspace(0.20, 0.70, THRESHOLD_GRID_SIZE)
+PCA_COMPONENTS = int(os.getenv("CSM_PCA_COMPONENTS", "2"))
+CLUSTER_COUNT = int(os.getenv("CSM_CLUSTER_COUNT", "4"))
 
 
 def get_cv_splits(y):
@@ -41,33 +44,11 @@ def get_cv_splits(y):
     return n_splits
 
 
-def build_interaction_features(X_train_base, X_test_base, selected_features):
-    """
-    Expands the selected feature set with pairwise interaction terms.
-    """
-    poly = PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)
-    poly.fit(X_train_base)
-
-    interaction_feature_names = poly.get_feature_names_out(selected_features)
-    X_train_interactions = pd.DataFrame(
-        poly.transform(X_train_base),
-        columns=interaction_feature_names,
-        index=X_train_base.index,
-    )
-    X_test_interactions = pd.DataFrame(
-        poly.transform(X_test_base),
-        columns=interaction_feature_names,
-        index=X_test_base.index,
-    )
-
-    return X_train_interactions, X_test_interactions
-
-
 def candidate_models(random_state=42):
     """
-    Creates the model candidates compared in the interaction-based experiment.
+    Creates the model candidates compared in the free-feature-engineering experiment.
     """
-    return {
+    models = {
         "hgb_base": lambda: HistGradientBoostingClassifier(
             random_state=random_state,
             max_iter=240,
@@ -75,14 +56,30 @@ def candidate_models(random_state=42):
             min_samples_leaf=20,
             max_leaf_nodes=63,
         ),
-        "hgb_interactions": lambda: HistGradientBoostingClassifier(
+        "hgb_engineered_cautious": lambda: HistGradientBoostingClassifier(
             random_state=random_state,
-            max_iter=240,
-            learning_rate=0.05,
-            min_samples_leaf=20,
+            max_iter=320,
+            learning_rate=0.03,
+            min_samples_leaf=40,
             max_leaf_nodes=63,
         ),
-        "logreg_interactions": lambda: Pipeline(
+        "hgb_engineered_expressive": lambda: HistGradientBoostingClassifier(
+            random_state=random_state,
+            max_iter=280,
+            learning_rate=0.05,
+            min_samples_leaf=12,
+            max_leaf_nodes=127,
+        ),
+        "rf_engineered": lambda: RandomForestClassifier(
+            random_state=random_state,
+            n_estimators=300 if FAST_MODE else 500,
+            min_samples_leaf=8,
+            min_samples_split=10,
+            max_depth=6,
+            max_features=0.5,
+            n_jobs=-1,
+        ),
+        "logreg_engineered": lambda: Pipeline(
             steps=[
                 ("scaler", StandardScaler()),
                 (
@@ -99,6 +96,7 @@ def candidate_models(random_state=42):
             ]
         ),
     }
+    return models
 
 
 def find_best_threshold(y, y_pred_proba, num_vars):
@@ -138,13 +136,15 @@ def evaluate_model(factory, X, y, num_vars):
 
 def main():
     """
-    Runs the interaction-feature experiment and exports the best submission variant.
+    Runs the free-feature-engineering experiment and exports the best submission variant.
     """
     logger.info("Running interaction-feature approach...")
     logger.info(
-        "Runtime config | fast_mode=%s | threshold_grid=%d",
+        "Runtime config | fast_mode=%s | threshold_grid=%d | pca_components=%d | clusters=%d",
         FAST_MODE,
         THRESHOLD_GRID_SIZE,
+        PCA_COMPONENTS,
+        CLUSTER_COUNT,
     )
     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
     X_train, y_train, X_test = load_project_data(data_dir=data_dir)
@@ -165,27 +165,34 @@ def main():
 
     X_train_base = X_train[selected_features]
     X_test_base = X_test[selected_features]
-    X_train_interactions, X_test_interactions = build_interaction_features(
+    X_train_engineered, X_test_engineered = build_free_engineered_features(
         X_train_base=X_train_base,
         X_test_base=X_test_base,
         selected_features=selected_features,
+        n_pca_components=PCA_COMPONENTS,
+        n_clusters=CLUSTER_COUNT,
     )
 
     logger.info(
-        "Base features: %d | interaction-expanded features: %d",
+        "Base features: %d | engineered feature space: %d",
         X_train_base.shape[1],
-        X_train_interactions.shape[1],
+        X_train_engineered.shape[1],
     )
 
     models = candidate_models(random_state=42)
     model_inputs = {
         "hgb_base": (X_train_base, X_test_base),
-        "hgb_interactions": (X_train_interactions, X_test_interactions),
-        "logreg_interactions": (X_train_interactions, X_test_interactions),
+        "hgb_engineered_cautious": (X_train_engineered, X_test_engineered),
+        "hgb_engineered_expressive": (X_train_engineered, X_test_engineered),
+        "rf_engineered": (X_train_engineered, X_test_engineered),
+        "logreg_engineered": (X_train_engineered, X_test_engineered),
     }
 
     if FAST_MODE:
-        models = {name: factory for name, factory in models.items() if name != "logreg_interactions"}
+        models = {
+            name: factory for name, factory in models.items()
+            if name not in {"logreg_engineered", "hgb_engineered_expressive"}
+        }
 
     best_model_name = None
     best_threshold = None
