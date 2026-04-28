@@ -25,8 +25,10 @@ FAST_MODE = os.getenv("CSM_FAST_MODE", "0") == "1"
 PARAM_SEARCH_ITER = int(os.getenv("CSM_PARAM_SEARCH_ITER", "6" if FAST_MODE else "10"))
 FILTER_TOP_N = int(os.getenv("CSM_FILTER_TOP_N", "35" if FAST_MODE else "45"))
 EMBEDDED_TARGET_N = int(os.getenv("CSM_EMBEDDED_TARGET_N", "10" if FAST_MODE else "12"))
-THRESHOLD_GRID_SIZE = int(os.getenv("CSM_THRESHOLD_GRID_SIZE", "15" if FAST_MODE else "31"))
-THRESHOLD_GRID = np.linspace(0.20, 0.70, THRESHOLD_GRID_SIZE)
+THRESHOLD_MIN = float(os.getenv("CSM_THRESHOLD_MIN", "0.05"))
+THRESHOLD_MAX = float(os.getenv("CSM_THRESHOLD_MAX", "0.45"))
+THRESHOLD_GRID_SIZE = int(os.getenv("CSM_THRESHOLD_GRID_SIZE", "21" if FAST_MODE else "41"))
+THRESHOLD_GRID = np.linspace(THRESHOLD_MIN, THRESHOLD_MAX, THRESHOLD_GRID_SIZE)
 TUNE_WITH_CALIBRATION = os.getenv("CSM_TUNE_WITH_CALIBRATION", "0") == "1"
 
 
@@ -112,9 +114,11 @@ def main():
     """
     logger.info("Running threshold-search + calibrated HGB approach...")
     logger.info(
-        "Runtime config | fast_mode=%s | param_iter=%d | threshold_grid=%d | tune_with_calibration=%s",
+        "Runtime config | fast_mode=%s | param_iter=%d | threshold_range=[%0.3f, %0.3f] | threshold_grid=%d | tune_with_calibration=%s",
         FAST_MODE,
         PARAM_SEARCH_ITER,
+        THRESHOLD_MIN,
+        THRESHOLD_MAX,
         THRESHOLD_GRID_SIZE,
         TUNE_WITH_CALIBRATION,
     )
