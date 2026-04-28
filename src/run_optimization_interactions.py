@@ -23,10 +23,17 @@ logger = logging.getLogger(__name__)
 
 MAX_OFFERS = 1000
 TEAM_NAME = os.getenv("TEAM_NAME", "ids")
-THRESHOLD_GRID = np.linspace(0.20, 0.70, 51)
+FAST_MODE = os.getenv("CSM_FAST_MODE", "0") == "1"
+FILTER_TOP_N = int(os.getenv("CSM_FILTER_TOP_N", "35" if FAST_MODE else "45"))
+EMBEDDED_TARGET_N = int(os.getenv("CSM_EMBEDDED_TARGET_N", "10" if FAST_MODE else "12"))
+THRESHOLD_GRID_SIZE = int(os.getenv("CSM_THRESHOLD_GRID_SIZE", "15" if FAST_MODE else "31"))
+THRESHOLD_GRID = np.linspace(0.20, 0.70, THRESHOLD_GRID_SIZE)
 
 
 def get_cv_splits(y):
+    """
+    Returns a valid number of stratified CV folds based on the minority class size.
+    """
     min_class_count = int(y.value_counts().min())
     n_splits = min(5, min_class_count)
     if n_splits < 2:
@@ -35,6 +42,9 @@ def get_cv_splits(y):
 
 
 def build_interaction_features(X_train_base, X_test_base, selected_features):
+    """
+    Expands the selected feature set with pairwise interaction terms.
+    """
     poly = PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)
     poly.fit(X_train_base)
 
@@ -54,6 +64,9 @@ def build_interaction_features(X_train_base, X_test_base, selected_features):
 
 
 def candidate_models(random_state=42):
+    """
+    Creates the model candidates compared in the interaction-based experiment.
+    """
     return {
         "hgb_base": lambda: HistGradientBoostingClassifier(
             random_state=random_state,
@@ -89,6 +102,9 @@ def candidate_models(random_state=42):
 
 
 def find_best_threshold(y, y_pred_proba, num_vars):
+    """
+    Finds the threshold that maximizes campaign profit for given probabilities.
+    """
     best_threshold = THRESHOLD_GRID[0]
     best_profit = -np.inf
     for threshold in THRESHOLD_GRID:
@@ -106,6 +122,9 @@ def find_best_threshold(y, y_pred_proba, num_vars):
 
 
 def evaluate_model(factory, X, y, num_vars):
+    """
+    Evaluates a model with out-of-fold probabilities and profit-based threshold search.
+    """
     cv = StratifiedKFold(n_splits=get_cv_splits(y), shuffle=True, random_state=42)
     oof_pred_proba = np.zeros(len(y), dtype=float)
 
@@ -118,14 +137,22 @@ def evaluate_model(factory, X, y, num_vars):
 
 
 def main():
+    """
+    Runs the interaction-feature experiment and exports the best submission variant.
+    """
     logger.info("Running interaction-feature approach...")
+    logger.info(
+        "Runtime config | fast_mode=%s | threshold_grid=%d",
+        FAST_MODE,
+        THRESHOLD_GRID_SIZE,
+    )
     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
     X_train, y_train, X_test = load_project_data(data_dir=data_dir)
     y = y_train.iloc[:, 0]
 
     selector = ProfitDrivenFeatureSelector(
-        filter_top_n=50,
-        embedded_target_n=15,
+        filter_top_n=FILTER_TOP_N,
+        embedded_target_n=EMBEDDED_TARGET_N,
         feature_cost=200,
         max_offers=MAX_OFFERS,
     )
@@ -156,6 +183,9 @@ def main():
         "hgb_interactions": (X_train_interactions, X_test_interactions),
         "logreg_interactions": (X_train_interactions, X_test_interactions),
     }
+
+    if FAST_MODE:
+        models = {name: factory for name, factory in models.items() if name != "logreg_interactions"}
 
     best_model_name = None
     best_threshold = None

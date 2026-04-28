@@ -23,10 +23,18 @@ logger = logging.getLogger(__name__)
 
 MAX_OFFERS = 1000
 TEAM_NAME = os.getenv("TEAM_NAME", "ids")
-THRESHOLD_GRID = np.linspace(0.20, 0.70, 51)
+FAST_MODE = os.getenv("CSM_FAST_MODE", "0") == "1"
+FILTER_TOP_N = int(os.getenv("CSM_FILTER_TOP_N", "35" if FAST_MODE else "45"))
+EMBEDDED_TARGET_N = int(os.getenv("CSM_EMBEDDED_TARGET_N", "10" if FAST_MODE else "12"))
+RF_ESTIMATORS = int(os.getenv("CSM_RF_ESTIMATORS", "250" if FAST_MODE else "400"))
+THRESHOLD_GRID_SIZE = int(os.getenv("CSM_THRESHOLD_GRID_SIZE", "15" if FAST_MODE else "31"))
+THRESHOLD_GRID = np.linspace(0.20, 0.70, THRESHOLD_GRID_SIZE)
 
 
 def get_cv_splits(y):
+    """
+    Returns a valid number of stratified CV folds based on the minority class size.
+    """
     min_class_count = int(y.value_counts().min())
     n_splits = min(5, min_class_count)
     if n_splits < 2:
@@ -35,16 +43,19 @@ def get_cv_splits(y):
 
 
 def model_factories(random_state=42):
+    """
+    Creates the candidate models used in the weighted soft-voting ensemble.
+    """
     return {
         "hgb": lambda: HistGradientBoostingClassifier(
             random_state=random_state,
-            max_iter=260,
+            max_iter=220,
             learning_rate=0.05,
             min_samples_leaf=20,
             max_leaf_nodes=63,
         ),
         "rf": lambda: RandomForestClassifier(
-            n_estimators=800,
+            n_estimators=RF_ESTIMATORS,
             min_samples_leaf=8,
             random_state=random_state,
             n_jobs=-1,
@@ -69,6 +80,9 @@ def model_factories(random_state=42):
 
 
 def oof_predict_proba(factory, X, y, cv):
+    """
+    Generates out-of-fold class-1 probabilities for a single model factory.
+    """
     oof_proba = np.zeros(len(y), dtype=float)
     for train_idx, valid_idx in cv.split(X, y):
         model = factory()
@@ -78,6 +92,9 @@ def oof_predict_proba(factory, X, y, cv):
 
 
 def find_best_threshold(y, y_pred_proba, num_vars):
+    """
+    Finds the threshold that yields the highest business profit.
+    """
     best_threshold = THRESHOLD_GRID[0]
     best_profit = -np.inf
     for threshold in THRESHOLD_GRID:
@@ -95,14 +112,23 @@ def find_best_threshold(y, y_pred_proba, num_vars):
 
 
 def main():
+    """
+    Runs the weighted ensemble pipeline and writes submission files for the best threshold.
+    """
     logger.info("Running weighted-ensemble approach...")
+    logger.info(
+        "Runtime config | fast_mode=%s | rf_estimators=%d | threshold_grid=%d",
+        FAST_MODE,
+        RF_ESTIMATORS,
+        THRESHOLD_GRID_SIZE,
+    )
     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
     X_train, y_train, X_test = load_project_data(data_dir=data_dir)
     y = y_train.iloc[:, 0]
 
     selector = ProfitDrivenFeatureSelector(
-        filter_top_n=50,
-        embedded_target_n=15,
+        filter_top_n=FILTER_TOP_N,
+        embedded_target_n=EMBEDDED_TARGET_N,
         feature_cost=200,
         max_offers=MAX_OFFERS,
     )

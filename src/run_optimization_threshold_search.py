@@ -20,11 +20,20 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 MAX_OFFERS = 1000
-THRESHOLD_GRID = np.linspace(0.20, 0.70, 51)
 TEAM_NAME = os.getenv("TEAM_NAME", "ids")
+FAST_MODE = os.getenv("CSM_FAST_MODE", "0") == "1"
+PARAM_SEARCH_ITER = int(os.getenv("CSM_PARAM_SEARCH_ITER", "6" if FAST_MODE else "10"))
+FILTER_TOP_N = int(os.getenv("CSM_FILTER_TOP_N", "35" if FAST_MODE else "45"))
+EMBEDDED_TARGET_N = int(os.getenv("CSM_EMBEDDED_TARGET_N", "10" if FAST_MODE else "12"))
+THRESHOLD_GRID_SIZE = int(os.getenv("CSM_THRESHOLD_GRID_SIZE", "15" if FAST_MODE else "31"))
+THRESHOLD_GRID = np.linspace(0.20, 0.70, THRESHOLD_GRID_SIZE)
+TUNE_WITH_CALIBRATION = os.getenv("CSM_TUNE_WITH_CALIBRATION", "0") == "1"
 
 
 def build_calibrated_model(base_model, cv_splits):
+    """
+    Wraps the base estimator with sigmoid probability calibration.
+    """
     try:
         return CalibratedClassifierCV(estimator=base_model, method="sigmoid", cv=cv_splits)
     except TypeError:
@@ -32,6 +41,9 @@ def build_calibrated_model(base_model, cv_splits):
 
 
 def best_threshold_for_profit(y_true, y_pred_proba, num_vars):
+    """
+    Finds the decision threshold that maximizes campaign profit.
+    """
     best_threshold = THRESHOLD_GRID[0]
     best_profit = -np.inf
 
@@ -51,6 +63,9 @@ def best_threshold_for_profit(y_true, y_pred_proba, num_vars):
 
 
 def get_cv_splits(y, upper_bound=5):
+    """
+    Returns a valid number of stratified CV folds based on the minority class size.
+    """
     min_class_count = int(y.value_counts().min())
     n_splits = min(upper_bound, min_class_count)
     if n_splits < 2:
@@ -59,11 +74,17 @@ def get_cv_splits(y, upper_bound=5):
 
 
 def get_optional_cv_splits(y, upper_bound=5):
+    """
+    Returns the largest feasible number of CV folds without enforcing a minimum of two.
+    """
     min_class_count = int(y.value_counts().min())
     return min(upper_bound, min_class_count)
 
 
 def evaluate_hgb_candidate(X, y, params, num_vars, random_state=42):
+    """
+    Evaluates one HistGradientBoosting configuration with out-of-fold profit scoring.
+    """
     cv = StratifiedKFold(n_splits=get_cv_splits(y), shuffle=True, random_state=random_state)
     oof_pred_proba = np.zeros(len(y), dtype=float)
 
@@ -74,7 +95,7 @@ def evaluate_hgb_candidate(X, y, params, num_vars, random_state=42):
         base_model = HistGradientBoostingClassifier(random_state=random_state, **params)
         calibration_cv = get_optional_cv_splits(y_train_fold, upper_bound=3)
 
-        if calibration_cv >= 2:
+        if TUNE_WITH_CALIBRATION and calibration_cv >= 2:
             model = build_calibrated_model(base_model, cv_splits=calibration_cv)
         else:
             model = base_model
@@ -86,14 +107,24 @@ def evaluate_hgb_candidate(X, y, params, num_vars, random_state=42):
 
 
 def main():
+    """
+    Runs the calibrated HGB pipeline with hyperparameter and threshold search for profit.
+    """
     logger.info("Running threshold-search + calibrated HGB approach...")
+    logger.info(
+        "Runtime config | fast_mode=%s | param_iter=%d | threshold_grid=%d | tune_with_calibration=%s",
+        FAST_MODE,
+        PARAM_SEARCH_ITER,
+        THRESHOLD_GRID_SIZE,
+        TUNE_WITH_CALIBRATION,
+    )
     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
     X_train, y_train, X_test = load_project_data(data_dir=data_dir)
     y = y_train.iloc[:, 0]
 
     selector = ProfitDrivenFeatureSelector(
-        filter_top_n=50,
-        embedded_target_n=15,
+        filter_top_n=FILTER_TOP_N,
+        embedded_target_n=EMBEDDED_TARGET_N,
         feature_cost=200,
         max_offers=MAX_OFFERS,
     )
@@ -114,7 +145,7 @@ def main():
         "max_iter": [120, 180, 240, 300],
         "l2_regularization": [0.0, 0.1, 0.5, 1.0],
     }
-    sampled_params = list(ParameterSampler(param_space, n_iter=18, random_state=42))
+    sampled_params = list(ParameterSampler(param_space, n_iter=PARAM_SEARCH_ITER, random_state=42))
 
     best_params = None
     best_threshold = None

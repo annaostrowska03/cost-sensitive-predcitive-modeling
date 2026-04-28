@@ -30,4 +30,14 @@ Additional standalone approaches are available in separate scripts:
 You can set a team prefix before running:
 `$env:TEAM_NAME="123456_98765_98764"` (PowerShell)
 
+If a script takes too long, use quick benchmark mode:
+`$env:CSM_FAST_MODE="1"`
+
+Useful runtime knobs:
+`$env:CSM_PARAM_SEARCH_ITER="6"`
+`$env:CSM_RF_ESTIMATORS="250"`
+`$env:CSM_THRESHOLD_GRID_SIZE="15"`
+`$env:CSM_FILTER_TOP_N="35"`
+`$env:CSM_EMBEDDED_TARGET_N="10"`
+
 *This project was created as part of the Advanced Machine Learning course (Data Science @ WUT)

@@ -6,7 +6,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 def load_project_data(data_dir="..\\data"):
-   
+    """
+    Loads the train and test files used in the project from the given directory.
+    """
     x_train_path = os.path.join(data_dir, "x_train.txt")
     y_train_path = os.path.join(data_dir, "y_train.txt")
     x_test_path = os.path.join(data_dir, "x_test.txt")
