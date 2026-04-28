@@ -4,10 +4,12 @@ import sys
 import pandas as pd
 import numpy as np
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier, VotingClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import ParameterSampler, StratifiedKFold
-from src.visualization import plot_learning_curve
+
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from src.visualization import plot_learning_curve
 from src.data_loader import load_project_data
 from src.feature_selection import ProfitDrivenFeatureSelector
 from src.evaluation import calculate_profit, select_offer_indices
@@ -123,15 +125,29 @@ def main():
         n_iter=20,
     )
 
-    logger.info(f"Profit-tuned CV estimate (before calibration): {tuned_cv_profit:,.0f} EUR")
-    base_model = HistGradientBoostingClassifier(random_state=42, **best_params)
+    logger.info(f"Profit-tuned CV estimate (before calibration/ensemble): {tuned_cv_profit:,.0f} EUR")
+
+    hgb_model = HistGradientBoostingClassifier(random_state=42, **best_params)
+    rf_model = RandomForestClassifier(random_state=42, n_estimators=300, max_depth=8, class_weight='balanced')
+    lr_model = LogisticRegression(random_state=42, max_iter=1000, C=0.01, penalty='l2')
+
+    ensemble = VotingClassifier(
+        estimators=[
+            ('hgb', hgb_model),
+            ('rf', rf_model),
+            ('lr', lr_model)
+        ],
+        voting='soft'
+    )
+
     calibration_cv = min(5, int(y.value_counts().min()))
     if calibration_cv >= 2:
-        final_model = build_calibrated_model(base_model, cv_splits=calibration_cv)
+        logger.info("Applying CalibratedClassifierCV on Ensemble for better probabilities...")
+        final_model = build_calibrated_model(ensemble, cv_splits=calibration_cv)
         final_model.fit(X_train_final, y)
     else:
         logger.warning("Not enough positive/negative examples for calibration CV. Falling back to uncalibrated model.")
-        final_model = base_model.fit(X_train_final, y)
+        final_model = ensemble.fit(X_train_final, y)
     
     y_test_pred_proba = final_model.predict_proba(X_test_final)[:, 1]
 

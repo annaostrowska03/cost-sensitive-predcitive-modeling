@@ -30,12 +30,15 @@ class ProfitDrivenFeatureSelector:
 
     def fit(self, X, y):
         """
-        Executes the 3-step feature selection pipeline and fits the best subset.
+        Executes the 4-step feature selection pipeline and fits the best subset.
         """
-        logger.info("Initializing 3-stage profit-driven feature selection pipeline...")
+        logger.info("Initializing 4-stage profit-driven feature selection pipeline (Trees Only)...")
         
+        # Step 0: Remove Highly Correlated Features
+        candidate_features_0 = self._step0_remove_correlated(X, threshold=0.85)
+
         # Step 1: Filter
-        candidate_features_1 = self._step1_filter(X, y)
+        candidate_features_1 = self._step1_filter(X[candidate_features_0], y)
         
         # Step 2: Embedded
         candidate_features_2 = self._step2_embedded(X, y, candidate_features_1)
@@ -51,6 +54,16 @@ class ProfitDrivenFeatureSelector:
         
         return self
 
+    def _step0_remove_correlated(self, X, threshold=0.85):
+        logger.info(f"Stage 0: Correlation Filter (Removing features with corr > {threshold})")
+        corr_matrix = X.corr(method='spearman').abs()
+        upper_tri = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+        to_drop = [column for column in upper_tri.columns if any(upper_tri[column] > threshold)]
+        
+        retained_features = [c for c in X.columns if c not in to_drop]
+        logger.debug(f"Stage 0 dropped {len(to_drop)} correlated features. Remaining: {len(retained_features)}")
+        return retained_features
+
     def _step1_filter(self, X, y):
         logger.info(f"Stage 1: Filter (Reducing from {X.shape[1]} to {self.filter_top_n} features)")
         rf = RandomForestClassifier(n_estimators=100, random_state=self.random_state, n_jobs=-1)
@@ -64,20 +77,17 @@ class ProfitDrivenFeatureSelector:
         return best_features
 
     def _step2_embedded(self, X, y, candidate_features):
-        logger.info(f"Stage 2: Embedded (Reducing from {len(candidate_features)} to max {self.embedded_target_n} features)")
+        logger.info(f"Stage 2: Embedded (Reducing from {len(candidate_features)} to max {self.embedded_target_n} features) using Trees Only")
         X_sub = X[candidate_features]
+
+        rf_embedded = RandomForestClassifier(n_estimators=300, max_depth=10, max_features='log2', random_state=self.random_state, n_jobs=-1)
+        rf_embedded.fit(X_sub, y)
+        importances = rf_embedded.feature_importances_
         
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X_sub)
-        
-        lasso = LogisticRegression(penalty='l1', solver='liblinear', C=0.01, random_state=self.random_state)
-        lasso.fit(X_scaled, y)
-        
-        importances = np.abs(lasso.coef_[0])
         top_indices = np.argsort(importances)[::-1][:self.embedded_target_n]
         best_features = [candidate_features[i] for i in top_indices if importances[i] > 0]
         
-        # Fallback if Lasso zeroes out too many coefficients
+        # Fallback if too many coefficients fall near zero
         if len(best_features) < self.embedded_target_n and len(best_features) < len(candidate_features):
             best_features = [candidate_features[i] for i in top_indices][:self.embedded_target_n]
             
