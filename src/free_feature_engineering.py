@@ -1,157 +1,151 @@
-import numpy as np
-import pandas as pd
+from __future__ import annotations
+
 from itertools import combinations, permutations
+
+import numpy as np
+import numpy.typing as npt
+import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-EPSILON = 1e-3
+# Denominators smaller than this are clamped to avoid near-zero division.
+_RATIO_EPSILON = 1e-3
 
 
-def signed_log1p(values):
-    """
-    Applies a sign-preserving log transform that remains defined for negative values.
-    """
-    return np.sign(values) * np.log1p(np.abs(values))
+def signed_log1p(values: npt.ArrayLike) -> np.ndarray:
+    """Sign-preserving log transform defined for negative values."""
+    v = np.asarray(values)
+    return np.sign(v) * np.log1p(np.abs(v))
 
 
-def safe_ratio(numerator, denominator, epsilon=EPSILON):
-    """
-    Computes a numerically stable ratio by clipping very small denominators.
-    """
-    denominator = np.where(np.abs(denominator) < epsilon, epsilon, denominator)
-    return numerator / denominator
+def safe_ratio(
+    numerator: npt.ArrayLike,
+    denominator: npt.ArrayLike,
+    epsilon: float = _RATIO_EPSILON,
+) -> np.ndarray:
+    """Numerically stable ratio — small denominators are clamped to *epsilon*."""
+    d = np.asarray(denominator)
+    d = np.where(np.abs(d) < epsilon, epsilon, d)
+    return np.asarray(numerator) / d
+
+
+def _append_features(
+    train_parts: list[pd.DataFrame],
+    test_parts: list[pd.DataFrame],
+    train_dict: dict[str, npt.ArrayLike],
+    test_dict: dict[str, npt.ArrayLike],
+    train_index: pd.Index,
+    test_index: pd.Index,
+) -> None:
+    """Append train_dict / test_dict as DataFrames if non-empty."""
+    if train_dict:
+        train_parts.append(pd.DataFrame(train_dict, index=train_index))
+        test_parts.append(pd.DataFrame(test_dict, index=test_index))
 
 
 def build_free_engineered_features(
-    X_train_base,
-    X_test_base,
-    selected_features,
-    n_pca_components=2,
-    n_clusters=4,
-    include_products=True,
-    include_ratios=True,
-    include_logs=True,
-    include_row_stats=True,
-    include_pca=True,
-    include_cluster_features=True,
-):
-    """
-    Builds "free" derived features from an already purchased subset of original variables.
-    """
-    X_train_base = X_train_base.copy()
-    X_test_base = X_test_base.copy()
+    X_train_base: pd.DataFrame,
+    X_test_base: pd.DataFrame,
+    selected_features: list[str],
+    n_pca_components: int = 2,
+    n_clusters: int = 4,
+    include_products: bool = True,
+    include_ratios: bool = True,
+    include_logs: bool = True,
+    include_row_stats: bool = True,
+    include_pca: bool = True,
+    include_cluster_features: bool = True,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build derived features from an already-purchased variable subset.
 
-    train_parts = [X_train_base]
-    test_parts = [X_test_base]
+    All transformations fitted on training data are applied identically to
+    test data to prevent leakage.  Returns (X_train_engineered, X_test_engineered).
+    """
+    X_tr = X_train_base.copy()
+    X_te = X_test_base.copy()
+
+    train_parts: list[pd.DataFrame] = [X_tr]
+    test_parts: list[pd.DataFrame] = [X_te]
+
+    tr_idx, te_idx = X_tr.index, X_te.index
 
     if include_products:
-        train_products = {}
-        test_products = {}
-        for left_feature, right_feature in combinations(selected_features, 2):
-            feature_name = f"{left_feature}__mul__{right_feature}"
-            train_products[feature_name] = X_train_base[left_feature] * X_train_base[right_feature]
-            test_products[feature_name] = X_test_base[left_feature] * X_test_base[right_feature]
-        if train_products:
-            train_parts.append(pd.DataFrame(train_products, index=X_train_base.index))
-            test_parts.append(pd.DataFrame(test_products, index=X_test_base.index))
+        tr_p, te_p = {}, {}
+        for l, r in combinations(selected_features, 2):
+            name = f"{l}__mul__{r}"
+            tr_p[name] = X_tr[l] * X_tr[r]
+            te_p[name] = X_te[l] * X_te[r]
+        _append_features(train_parts, test_parts, tr_p, te_p, tr_idx, te_idx)
 
     if include_ratios:
-        train_ratios = {}
-        test_ratios = {}
-        for numerator_feature, denominator_feature in permutations(selected_features, 2):
-            feature_name = f"{numerator_feature}__div__{denominator_feature}"
-            train_ratios[feature_name] = safe_ratio(
-                X_train_base[numerator_feature].to_numpy(),
-                X_train_base[denominator_feature].to_numpy(),
-            )
-            test_ratios[feature_name] = safe_ratio(
-                X_test_base[numerator_feature].to_numpy(),
-                X_test_base[denominator_feature].to_numpy(),
-            )
-        if train_ratios:
-            train_parts.append(pd.DataFrame(train_ratios, index=X_train_base.index))
-            test_parts.append(pd.DataFrame(test_ratios, index=X_test_base.index))
+        tr_r, te_r = {}, {}
+        for num, den in permutations(selected_features, 2):
+            name = f"{num}__div__{den}"
+            tr_r[name] = safe_ratio(X_tr[num].to_numpy(), X_tr[den].to_numpy())
+            te_r[name] = safe_ratio(X_te[num].to_numpy(), X_te[den].to_numpy())
+        _append_features(train_parts, test_parts, tr_r, te_r, tr_idx, te_idx)
 
     if include_logs:
-        train_logs = {}
-        test_logs = {}
-        for feature in selected_features:
-            feature_name = f"{feature}__log1p_signed"
-            train_logs[feature_name] = signed_log1p(X_train_base[feature].to_numpy())
-            test_logs[feature_name] = signed_log1p(X_test_base[feature].to_numpy())
-        train_parts.append(pd.DataFrame(train_logs, index=X_train_base.index))
-        test_parts.append(pd.DataFrame(test_logs, index=X_test_base.index))
+        tr_l, te_l = {}, {}
+        for feat in selected_features:
+            name = f"{feat}__log1p_signed"
+            tr_l[name] = signed_log1p(X_tr[feat].to_numpy())
+            te_l[name] = signed_log1p(X_te[feat].to_numpy())
+        _append_features(train_parts, test_parts, tr_l, te_l, tr_idx, te_idx)
 
     if include_row_stats:
-        train_stats = pd.DataFrame(
-            {
-                "row_mean": X_train_base.mean(axis=1),
-                "row_std": X_train_base.std(axis=1),
-                "row_min": X_train_base.min(axis=1),
-                "row_max": X_train_base.max(axis=1),
-                "row_range": X_train_base.max(axis=1) - X_train_base.min(axis=1),
-            },
-            index=X_train_base.index,
-        )
-        test_stats = pd.DataFrame(
-            {
-                "row_mean": X_test_base.mean(axis=1),
-                "row_std": X_test_base.std(axis=1),
-                "row_min": X_test_base.min(axis=1),
-                "row_max": X_test_base.max(axis=1),
-                "row_range": X_test_base.max(axis=1) - X_test_base.min(axis=1),
-            },
-            index=X_test_base.index,
-        )
-        train_parts.append(train_stats)
-        test_parts.append(test_stats)
+        def _row_stats(df: pd.DataFrame) -> pd.DataFrame:
+            return pd.DataFrame({
+                "row_mean":  df.mean(axis=1),
+                "row_std":   df.std(axis=1),
+                "row_min":   df.min(axis=1),
+                "row_max":   df.max(axis=1),
+                "row_range": df.max(axis=1) - df.min(axis=1),
+            }, index=df.index)
+        train_parts.append(_row_stats(X_tr))
+        test_parts.append(_row_stats(X_te))
 
     scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train_base)
-    X_test_scaled = scaler.transform(X_test_base)
+    X_tr_scaled = scaler.fit_transform(X_tr)
+    X_te_scaled = scaler.transform(X_te)
 
     if include_pca:
-        n_components = min(n_pca_components, len(selected_features))
-        if n_components >= 1:
-            pca = PCA(n_components=n_components, random_state=42)
-            train_pca = pca.fit_transform(X_train_scaled)
-            test_pca = pca.transform(X_test_scaled)
-            pca_columns = [f"pca_component_{idx + 1}" for idx in range(n_components)]
-            train_parts.append(pd.DataFrame(train_pca, columns=pca_columns, index=X_train_base.index))
-            test_parts.append(pd.DataFrame(test_pca, columns=pca_columns, index=X_test_base.index))
+        n_comp = min(n_pca_components, len(selected_features))
+        if n_comp >= 1:
+            pca = PCA(n_components=n_comp, random_state=42)
+            cols = [f"pca_component_{i + 1}" for i in range(n_comp)]
+            train_parts.append(
+                pd.DataFrame(pca.fit_transform(X_tr_scaled), columns=cols, index=tr_idx)
+            )
+            test_parts.append(
+                pd.DataFrame(pca.transform(X_te_scaled), columns=cols, index=te_idx)
+            )
 
     if include_cluster_features:
-        n_clusters = min(n_clusters, max(2, len(selected_features)))
-        kmeans = KMeans(n_clusters=n_clusters, n_init=20, random_state=42)
-        train_cluster_labels = kmeans.fit_predict(X_train_scaled)
-        test_cluster_labels = kmeans.predict(X_test_scaled)
-        train_cluster_distances = kmeans.transform(X_train_scaled)
-        test_cluster_distances = kmeans.transform(X_test_scaled)
+        k = min(n_clusters, max(2, len(selected_features)))
+        kmeans = KMeans(n_clusters=k, n_init=20, random_state=42)
+        kmeans.fit(X_tr_scaled)
 
-        cluster_label_column = pd.DataFrame(
-            {"cluster_id": train_cluster_labels},
-            index=X_train_base.index,
-        )
-        test_cluster_label_column = pd.DataFrame(
-            {"cluster_id": test_cluster_labels},
-            index=X_test_base.index,
-        )
-        train_parts.append(cluster_label_column)
-        test_parts.append(test_cluster_label_column)
-
-        cluster_distance_columns = [f"cluster_distance_{idx}" for idx in range(n_clusters)]
+        dist_cols = [f"cluster_distance_{i}" for i in range(k)]
         train_parts.append(
-            pd.DataFrame(train_cluster_distances, columns=cluster_distance_columns, index=X_train_base.index)
+            pd.DataFrame({"cluster_id": kmeans.predict(X_tr_scaled)}, index=tr_idx)
+        )
+        train_parts.append(
+            pd.DataFrame(kmeans.transform(X_tr_scaled), columns=dist_cols, index=tr_idx)
         )
         test_parts.append(
-            pd.DataFrame(test_cluster_distances, columns=cluster_distance_columns, index=X_test_base.index)
+            pd.DataFrame({"cluster_id": kmeans.predict(X_te_scaled)}, index=te_idx)
+        )
+        test_parts.append(
+            pd.DataFrame(kmeans.transform(X_te_scaled), columns=dist_cols, index=te_idx)
         )
 
-    X_train_engineered = pd.concat(train_parts, axis=1)
-    X_test_engineered = pd.concat(test_parts, axis=1)
+    X_tr_eng = pd.concat(train_parts, axis=1)
+    X_te_eng = pd.concat(test_parts, axis=1)
 
-    X_train_engineered = X_train_engineered.loc[:, ~X_train_engineered.columns.duplicated()]
-    X_test_engineered = X_test_engineered.loc[:, ~X_test_engineered.columns.duplicated()]
+    # Deduplicate columns that may arise from name collisions between feature groups.
+    X_tr_eng = X_tr_eng.loc[:, ~X_tr_eng.columns.duplicated()]
+    X_te_eng = X_te_eng.loc[:, ~X_te_eng.columns.duplicated()]
 
-    return X_train_engineered, X_test_engineered
+    return X_tr_eng, X_te_eng
