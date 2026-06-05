@@ -20,21 +20,66 @@ two hard constraints:
 Score = (TP × 10) − (FP × 5) − (num_variables × 200)
 ```
 
+### Results
+
+| | |
+|---|---|
+| **Selected features** | V11, V160, V191, V215, V342, V380 (6 variables) |
+| **CV profit (biased)** | 5 065 EUR |
+| **CV profit (nested CV, unbiased)** | run `nested_cv_profit_estimate()` |
+| **Strategy** | HGB-only (ensemble did not improve) |
+| **Decision threshold** | 0.170 |
+| **Submission** | 1 000 customers |
+
 ## Team
 
 - [Anna Ostrowska](https://github.com/annaostrowska03)
 - [Gabriela Majstrak](https://github.com/GabrielaMajstrak)
 - [Igor Lechoszest](https://github.com/IgorLechoszest)
 
+## Project structure
+
+```
+.
+├── data/                     # raw data (gitignored)
+├── docs/                     # plots and visualisations
+│   ├── profit_curve.png      # SFS profit vs number of features
+│   ├── experiments_comparison.png
+│   └── test_predictions.png
+├── notebooks/
+│   ├── 01_EDA.ipynb
+│   └── 02_Experiments_Summary.ipynb
+├── presentation/
+├── report/
+├── results/                  # old submission variants and experiment CSVs
+├── src/
+│   ├── config.py             # all env-var config in one place
+│   ├── data_loader.py
+│   ├── evaluation.py         # calculate_profit, select_offer_indices
+│   ├── feature_selection.py  # 4-stage ProfitDrivenFeatureSelector
+│   ├── free_feature_engineering.py
+│   ├── run_optimization.py   # main pipeline entry point
+│   ├── run_experiments.py    # multi-config sweep
+│   ├── utils.py              # shared helpers
+│   ├── visualization.py
+│   └── experiments/          # alternative pipeline variants
+│       ├── run_optimization_ensemble.py
+│       ├── run_optimization_interactions.py
+│       ├── run_optimization_max_profit.py
+│       ├── run_optimization_rf_only.py
+│       └── run_optimization_threshold_search.py
+├── ids_obs.txt               # current submission — customer indices
+├── ids_vars.txt              # current submission — variable indices
+├── pyproject.toml
+└── requirements.txt
+```
+
 ## Setup
 
 **Recommended — [uv](https://docs.astral.sh/uv/):**
 
 ```powershell
-# Install uv (once)
-powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-# Create venv and install dependencies
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"   # install uv (once)
 uv sync
 ```
 
@@ -50,10 +95,8 @@ pip install -r requirements.txt
 uv run python -m src.run_optimization
 ```
 
-This runs the full 4-stage profit-driven feature selector followed by HGB hyperparameter
-tuning and ensemble strategy selection. Submission files are written to the project root.
-
-Set your team prefix before running:
+Runs the full pipeline: 4-stage feature selection → HGB hyperparameter tuning →
+ensemble strategy selection → submission files written to project root.
 
 ```powershell
 $env:TEAM_NAME = "123456_98765_98764"
@@ -69,35 +112,37 @@ uv run jupyter notebook
 
 ## Alternative pipelines
 
-Each script below follows the same interface (`TEAM_NAME`, `CSM_FAST_MODE`, etc.) and
-writes its own pair of submission files.
+All variants live in `src/experiments/` and share the same interface.
 
-| Script | Approach | Output prefix |
-|--------|----------|---------------|
-| `src.run_optimization_threshold_search` | Calibrated HGB + grid threshold search | `*_threshold_` |
-| `src.run_optimization_ensemble` | Weighted soft-voting (HGB + RF + LR) | `*_ensemble_` |
-| `src.run_optimization_interactions` | Free engineered features (products, ratios, PCA, KMeans) | `*_interactions_` |
-| `src.run_optimization_rf_only` | Random Forest + threshold search | `*_rf_only_` |
-| `src.run_optimization_max_profit` | Model zoo + pairwise blend search on engineered features | `*_max_profit_` |
-| `src.run_experiments` | Multi-config feature-selection sweep + final ensemble | `*_obs / *_vars` |
-
-Run any variant with:
+| Module | Approach |
+|--------|----------|
+| `src.experiments.run_optimization_threshold_search` | Calibrated HGB + grid threshold search |
+| `src.experiments.run_optimization_ensemble` | Weighted soft-voting (HGB + RF + LR) |
+| `src.experiments.run_optimization_interactions` | Free engineered features (products, ratios, PCA, KMeans) |
+| `src.experiments.run_optimization_rf_only` | Random Forest + threshold search |
+| `src.experiments.run_optimization_max_profit` | Model zoo + pairwise blend search |
+| `src.run_experiments` | Multi-config feature-selection sweep |
 
 ```powershell
-uv run python -m src.run_optimization_ensemble
+uv run python -m src.experiments.run_optimization_ensemble
 ```
 
 ## Runtime knobs
 
-| Environment variable | Default | Effect |
-|----------------------|---------|--------|
-| `CSM_FAST_MODE=1` | `0` | Reduces grid sizes and estimator counts for quick benchmarks |
-| `CSM_FILTER_TOP_N` | `55` | RF-filter stage width |
-| `CSM_EMBEDDED_TARGET_N` | `15` | Embedded-stage target feature count |
-| `CSM_PARAM_SEARCH_ITER` | `24` | HGB random-search iterations |
+| Environment variable | Default (slow/fast) | Effect |
+|----------------------|---------------------|--------|
+| `CSM_FAST_MODE=1` | `0` | Reduces grid sizes for quick benchmarks |
+| `CSM_FILTER_TOP_N` | `55` / `40` | RF-filter stage width |
+| `CSM_EMBEDDED_TARGET_N` | `15` / `10` | Embedded-stage target feature count |
+| `CSM_PARAM_SEARCH_ITER` | `24` / `8` | HGB random-search iterations |
 | `CSM_THRESHOLD_MIN` | `0.15` | Lower bound of threshold grid |
 | `CSM_THRESHOLD_MAX` | `0.50` | Upper bound of threshold grid |
-| `CSM_THRESHOLD_GRID_SIZE` | `36` | Number of threshold grid points |
+| `CSM_THRESHOLD_GRID_SIZE` | `36` / `17` | Number of threshold grid points |
+| `CSM_THRESHOLD_MARGIN` | `0.02` | Conservative threshold shift to reduce FP on test |
+| `CSM_SFS_REPEATS` | `3` / `1` | Repeated-CV runs in SFS wrapper |
+| `CSM_SFS_FOLDS` | `5` | CV folds inside SFS wrapper |
+| `CSM_FILTER_RF_N` | `100` | Trees in Stage-1 RF filter |
+| `CSM_EMBEDDED_RF_N` | `300` | Trees in Stage-2 embedded RF |
 
 ---
 
