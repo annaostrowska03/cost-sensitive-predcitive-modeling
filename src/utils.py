@@ -11,7 +11,6 @@ import os
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-from sklearn.base import clone
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedKFold

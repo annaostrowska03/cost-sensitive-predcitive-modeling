@@ -37,7 +37,9 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "N", "B", "A"]
-ignore = ["E501"]
+# N803/N806: ML convention uses uppercase X for feature matrices (matches scikit-learn API).
+# N802: same reason — function args like X, C are standard ML names.
+ignore = ["E501", "N803", "N806", "N802"]
 
 [tool.mypy]
 python_version = "3.11"

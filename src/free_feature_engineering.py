@@ -72,10 +72,10 @@ def build_free_engineered_features(
 
     if include_products:
         tr_p, te_p = {}, {}
-        for l, r in combinations(selected_features, 2):
-            name = f"{l}__mul__{r}"
-            tr_p[name] = X_tr[l] * X_tr[r]
-            te_p[name] = X_te[l] * X_te[r]
+        for left, right in combinations(selected_features, 2):
+            name = f"{left}__mul__{right}"
+            tr_p[name] = X_tr[left] * X_tr[right]
+            te_p[name] = X_te[left] * X_te[right]
         _append_features(train_parts, test_parts, tr_p, te_p, tr_idx, te_idx)
 
     if include_ratios:
