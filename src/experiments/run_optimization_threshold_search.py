@@ -7,11 +7,11 @@ import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.model_selection import ParameterSampler, StratifiedKFold
 
-from .config import Config
-from .data_loader import load_project_data
-from .evaluation import select_offer_indices
-from .feature_selection import ProfitDrivenFeatureSelector
-from .utils import calibrate, cv_splits, find_best_threshold, write_submission
+from ..config import Config
+from ..data_loader import load_project_data
+from ..evaluation import select_offer_indices
+from ..feature_selection import ProfitDrivenFeatureSelector
+from ..utils import calibrate, cv_splits, find_best_threshold, write_submission
 
 logging.basicConfig(
     level=logging.INFO,

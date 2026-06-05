@@ -8,12 +8,12 @@ import numpy as np
 from sklearn.base import clone
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 
-from .config import Config
-from .data_loader import load_project_data
-from .evaluation import calculate_profit, select_offer_indices
-from .feature_selection import ProfitDrivenFeatureSelector
-from .free_feature_engineering import build_free_engineered_features
-from .utils import logistic_pipeline, oof_predict_proba, write_submission
+from ..config import Config
+from ..data_loader import load_project_data
+from ..evaluation import calculate_profit, select_offer_indices
+from ..feature_selection import ProfitDrivenFeatureSelector
+from ..free_feature_engineering import build_free_engineered_features
+from ..utils import logistic_pipeline, oof_predict_proba, write_submission
 
 logging.basicConfig(
     level=logging.INFO,

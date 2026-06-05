@@ -81,6 +81,10 @@ class Config:
     sfs_n_repeats: int | None = field(default=None)
     sfs_cv_folds: int = field(default_factory=lambda: _int("CSM_SFS_FOLDS", 5))
 
+    # RF trees in feature selection stages
+    filter_n_estimators: int = field(default_factory=lambda: _int("CSM_FILTER_RF_N", 100))
+    embedded_n_estimators: int = field(default_factory=lambda: _int("CSM_EMBEDDED_RF_N", 300))
+
     def __post_init__(self) -> None:
         fm = self.fast_mode
         if self.filter_top_n is None:
@@ -114,6 +118,8 @@ class Config:
             "random_state": self.random_state,
             "sfs_n_repeats": self.sfs_n_repeats,
             "sfs_cv_folds": self.sfs_cv_folds,
+            "filter_n_estimators": self.filter_n_estimators,
+            "embedded_n_estimators": self.embedded_n_estimators,
         }
 
     @property

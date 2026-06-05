@@ -7,11 +7,11 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import ParameterSampler
 
-from .config import Config
-from .data_loader import load_project_data
-from .evaluation import select_offer_indices
-from .feature_selection import ProfitDrivenFeatureSelector
-from .utils import find_best_threshold, oof_predict_proba, write_submission
+from ..config import Config
+from ..data_loader import load_project_data
+from ..evaluation import select_offer_indices
+from ..feature_selection import ProfitDrivenFeatureSelector
+from ..utils import find_best_threshold, oof_predict_proba, write_submission
 
 logging.basicConfig(
     level=logging.INFO,

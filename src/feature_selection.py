@@ -41,6 +41,8 @@ class ProfitDrivenFeatureSelector:
         corr_threshold: float = 0.85,
         sfs_n_repeats: int = 3,
         sfs_cv_folds: int = 5,
+        filter_n_estimators: int = 100,
+        embedded_n_estimators: int = 300,
     ) -> None:
         self.filter_top_n = filter_top_n
         self.embedded_target_n = embedded_target_n
@@ -50,6 +52,8 @@ class ProfitDrivenFeatureSelector:
         self.corr_threshold = corr_threshold
         self.sfs_n_repeats = sfs_n_repeats
         self.sfs_cv_folds = sfs_cv_folds
+        self.filter_n_estimators = filter_n_estimators
+        self.embedded_n_estimators = embedded_n_estimators
         self.selected_features_: list[str] = []
         self.expected_profit_: float = 0.0
         self.profit_history_: list[tuple[int, float]] = []
@@ -85,7 +89,7 @@ class ProfitDrivenFeatureSelector:
         """Rank features by RF importance and keep the top *filter_top_n*."""
         logger.info("Stage 1: RF filter (%d → %d)", X.shape[1], self.filter_top_n)
         rf = RandomForestClassifier(
-            n_estimators=100, random_state=self.random_state, n_jobs=-1
+            n_estimators=self.filter_n_estimators, random_state=self.random_state, n_jobs=-1
         )
         rf.fit(X, y)
         top_idx = np.argsort(rf.feature_importances_)[::-1][: self.filter_top_n]
@@ -101,7 +105,7 @@ class ProfitDrivenFeatureSelector:
             "Stage 2: embedded selection (%d → max %d)", len(candidates), self.embedded_target_n
         )
         rf = RandomForestClassifier(
-            n_estimators=300, max_depth=10, max_features="log2",
+            n_estimators=self.embedded_n_estimators, max_depth=10, max_features="log2",
             random_state=self.random_state, n_jobs=-1,
         )
         rf.fit(X[candidates], y)
