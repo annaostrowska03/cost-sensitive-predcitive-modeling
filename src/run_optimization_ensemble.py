@@ -1,18 +1,15 @@
+from __future__ import annotations
+
 import logging
 import os
-import sys
-import numpy as np
-import pandas as pd
-from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from src.data_loader import load_project_data
-from src.evaluation import calculate_profit, select_offer_indices
-from src.feature_selection import ProfitDrivenFeatureSelector
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
+
+from .config import Config
+from .data_loader import load_project_data
+from .evaluation import select_offer_indices
+from .feature_selection import ProfitDrivenFeatureSelector
+from .utils import find_best_threshold, logistic_pipeline, oof_predict_proba, write_submission
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,192 +18,80 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-MAX_OFFERS = 1000
-TEAM_NAME = os.getenv("TEAM_NAME", "ids")
-FAST_MODE = os.getenv("CSM_FAST_MODE", "0") == "1"
-FILTER_TOP_N = int(os.getenv("CSM_FILTER_TOP_N", "35" if FAST_MODE else "45"))
-EMBEDDED_TARGET_N = int(os.getenv("CSM_EMBEDDED_TARGET_N", "10" if FAST_MODE else "12"))
-RF_ESTIMATORS = int(os.getenv("CSM_RF_ESTIMATORS", "250" if FAST_MODE else "400"))
-THRESHOLD_MIN = float(os.getenv("CSM_THRESHOLD_MIN", "0.05"))
-THRESHOLD_MAX = float(os.getenv("CSM_THRESHOLD_MAX", "0.45"))
-THRESHOLD_GRID_SIZE = int(os.getenv("CSM_THRESHOLD_GRID_SIZE", "21" if FAST_MODE else "41"))
-THRESHOLD_GRID = np.linspace(THRESHOLD_MIN, THRESHOLD_MAX, THRESHOLD_GRID_SIZE)
+cfg = Config()
 
 
-def get_cv_splits(y):
-    """
-    Returns a valid number of stratified CV folds based on the minority class size.
-    """
-    min_class_count = int(y.value_counts().min())
-    n_splits = min(5, min_class_count)
-    if n_splits < 2:
-        raise ValueError("Not enough class samples for CV.")
-    return n_splits
-
-
-def model_factories(random_state=42):
-    """
-    Creates the candidate models used in the weighted soft-voting ensemble.
-    """
+def _model_factories() -> dict[str, callable]:
     return {
         "hgb": lambda: HistGradientBoostingClassifier(
-            random_state=random_state,
-            max_iter=220,
-            learning_rate=0.05,
-            min_samples_leaf=20,
-            max_leaf_nodes=63,
+            random_state=cfg.random_state, max_iter=220, learning_rate=0.05,
+            min_samples_leaf=20, max_leaf_nodes=63,
         ),
         "rf": lambda: RandomForestClassifier(
-            n_estimators=RF_ESTIMATORS,
-            min_samples_leaf=8,
-            random_state=random_state,
-            n_jobs=-1,
+            n_estimators=cfg.rf_estimators, min_samples_leaf=8,
+            random_state=cfg.random_state, n_jobs=-1,
         ),
-        "logreg": lambda: Pipeline(
-            steps=[
-                ("scaler", StandardScaler()),
-                (
-                    "model",
-                    LogisticRegression(
-                        C=0.2,
-                        penalty="l2",
-                        max_iter=2500,
-                        class_weight="balanced",
-                        solver="lbfgs",
-                        random_state=random_state,
-                    ),
-                ),
-            ]
-        ),
+        "lr": lambda: logistic_pipeline(C=0.2, class_weight="balanced", random_state=cfg.random_state),
     }
 
 
-def oof_predict_proba(factory, X, y, cv):
-    """
-    Generates out-of-fold class-1 probabilities for a single model factory.
-    """
-    oof_proba = np.zeros(len(y), dtype=float)
-    for train_idx, valid_idx in cv.split(X, y):
-        model = factory()
-        model.fit(X.iloc[train_idx], y.iloc[train_idx])
-        oof_proba[valid_idx] = model.predict_proba(X.iloc[valid_idx])[:, 1]
-    return oof_proba
-
-
-def find_best_threshold(y, y_pred_proba, num_vars):
-    """
-    Finds the threshold that yields the highest business profit.
-    """
-    best_threshold = THRESHOLD_GRID[0]
-    best_profit = -np.inf
-    for threshold in THRESHOLD_GRID:
-        profit = calculate_profit(
-            y_true=y,
-            y_pred_proba=y_pred_proba,
-            threshold=threshold,
-            num_vars=num_vars,
-            max_offers=MAX_OFFERS,
-        )
-        if profit > best_profit:
-            best_profit = profit
-            best_threshold = threshold
-    return best_threshold, best_profit
-
-
-def main():
-    """
-    Runs the weighted ensemble pipeline and writes submission files for the best threshold.
-    """
-    logger.info("Running weighted-ensemble approach...")
+def main() -> None:
+    """Profit-proportional soft-voting ensemble with CV-based threshold search."""
     logger.info(
-        "Runtime config | fast_mode=%s | rf_estimators=%d | threshold_range=[%0.3f, %0.3f] | threshold_grid=%d",
-        FAST_MODE,
-        RF_ESTIMATORS,
-        THRESHOLD_MIN,
-        THRESHOLD_MAX,
-        THRESHOLD_GRID_SIZE,
+        "ensemble pipeline | fast=%s | rf_estimators=%d | thr_grid=%d",
+        cfg.fast_mode, cfg.rf_estimators, len(cfg.threshold_grid),
     )
+
     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
     X_train, y_train, X_test = load_project_data(data_dir=data_dir)
     y = y_train.iloc[:, 0]
 
-    selector = ProfitDrivenFeatureSelector(
-        filter_top_n=FILTER_TOP_N,
-        embedded_target_n=EMBEDDED_TARGET_N,
-        feature_cost=200,
-        max_offers=MAX_OFFERS,
-    )
+    selector = ProfitDrivenFeatureSelector(**cfg.selector_kwargs)
     selector.fit(X_train, y)
-
-    selected_features = selector.selected_features_
-    if not selected_features:
-        logger.warning("No profitable feature subset selected. Exiting.")
+    features = selector.selected_features_
+    if not features:
+        logger.warning("No profitable features selected. Exiting.")
         return
 
-    X_train_final = X_train[selected_features]
-    X_test_final = X_test[selected_features]
+    X_tr = X_train[features]
+    X_te = X_test[features]
 
-    cv = StratifiedKFold(n_splits=get_cv_splits(y), shuffle=True, random_state=42)
-    factories = model_factories(random_state=42)
+    factories = _model_factories()
+    oof_preds: dict[str, object] = {}
+    weights: dict[str, float] = {}
+    for name, factory in factories.items():
+        oof = oof_predict_proba(factory, X_tr, y)
+        oof_preds[name] = oof
+        _, solo_profit = find_best_threshold(
+            y, oof, num_vars=0, threshold_grid=cfg.threshold_grid, max_offers=cfg.max_offers,
+        )
+        # Clamp to 1.0 so models with negative standalone profit still contribute.
+        weights[name] = max(solo_profit, 1.0)
+        logger.info("Model %s | standalone CV profit=%0.0f", name, solo_profit)
 
-    oof_predictions = {}
-    model_weights = {}
+    weight_sum = sum(weights.values())
+    # Guard against the degenerate case where every model has near-zero profit.
+    if weight_sum == 0:
+        weight_sum = float(len(weights))
+    weights = {k: v / weight_sum for k, v in weights.items()}
+    logger.info("Ensemble weights: %s", weights)
 
-    for model_name, factory in factories.items():
-        model_oof = oof_predict_proba(factory, X_train_final, y, cv)
-        oof_predictions[model_name] = model_oof
-
-        _, model_profit = find_best_threshold(y, model_oof, num_vars=0)
-        model_weights[model_name] = max(model_profit, 1.0)
-        logger.info("Model %s | standalone customer-profit=%0.0f", model_name, model_profit)
-
-    weight_sum = sum(model_weights.values())
-    normalized_weights = {name: weight / weight_sum for name, weight in model_weights.items()}
-    logger.info("Ensemble weights: %s", normalized_weights)
-
-    ensemble_oof = np.zeros(len(y), dtype=float)
-    for model_name, model_oof in oof_predictions.items():
-        ensemble_oof += normalized_weights[model_name] * model_oof
-
-    best_threshold, best_profit = find_best_threshold(
-        y=y,
-        y_pred_proba=ensemble_oof,
-        num_vars=len(selected_features),
+    ensemble_oof = sum(w * oof_preds[k] for k, w in weights.items())
+    best_t, best_p = find_best_threshold(
+        y, ensemble_oof, num_vars=len(features),
+        threshold_grid=cfg.threshold_grid, max_offers=cfg.max_offers,
     )
-    logger.info("Best ensemble CV-profit=%0.0f | threshold=%0.3f", best_profit, best_threshold)
+    logger.info("Ensemble CV profit=%0.0f | threshold=%0.3f", best_p, best_t)
 
-    fitted_models = {}
-    for model_name, factory in factories.items():
-        model = factory()
-        model.fit(X_train_final, y)
-        fitted_models[model_name] = model
+    fitted = {name: factory() for name, factory in factories.items()}
+    for model in fitted.values():
+        model.fit(X_tr, y)
 
-    y_test_pred_proba = np.zeros(len(X_test_final), dtype=float)
-    for model_name, model in fitted_models.items():
-        y_test_pred_proba += normalized_weights[model_name] * model.predict_proba(X_test_final)[:, 1]
-
-    top_indices = select_offer_indices(
-        y_pred_proba=y_test_pred_proba,
-        threshold=best_threshold,
-        max_offers=MAX_OFFERS,
-    )
-    submission_indices = top_indices + 1
-
-    raw_var_indices = [
-        int(feature.replace("V", "")) for feature in selected_features
-    ] if all(feature.startswith("V") for feature in selected_features) else selected_features
+    y_test = sum(weights[k] * m.predict_proba(X_te)[:, 1] for k, m in fitted.items())
+    top_indices = select_offer_indices(y_test, threshold=best_t, max_offers=cfg.max_offers)
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    obs_file = os.path.join(project_root, f"{TEAM_NAME}_ensemble_obs.txt")
-    vars_file = os.path.join(project_root, f"{TEAM_NAME}_ensemble_vars.txt")
-
-    pd.Series(submission_indices).to_csv(obs_file, index=False, header=False)
-    pd.DataFrame(raw_var_indices).to_csv(vars_file, index=False, header=False)
-
-    logger.info("Submission files written:")
-    logger.info("Observations: %s", obs_file)
-    logger.info("Variables:    %s", vars_file)
-    logger.info("Selected customers: %d", len(submission_indices))
+    write_submission(top_indices + 1, features, project_root, cfg.team_name, suffix="ensemble")
 
 
 if __name__ == "__main__":

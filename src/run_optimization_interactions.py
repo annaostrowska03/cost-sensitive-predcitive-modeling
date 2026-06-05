@@ -1,19 +1,16 @@
+from __future__ import annotations
+
 import logging
 import os
-import sys
-import numpy as np
-import pandas as pd
-from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from src.data_loader import load_project_data
-from src.evaluation import calculate_profit, select_offer_indices
-from src.feature_selection import ProfitDrivenFeatureSelector
-from src.free_feature_engineering import build_free_engineered_features
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
+
+from .config import Config
+from .data_loader import load_project_data
+from .evaluation import select_offer_indices
+from .feature_selection import ProfitDrivenFeatureSelector
+from .free_feature_engineering import build_free_engineered_features
+from .utils import find_best_threshold, logistic_pipeline, oof_predict_proba, write_submission
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,235 +19,103 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-MAX_OFFERS = 1000
-TEAM_NAME = os.getenv("TEAM_NAME", "ids")
-FAST_MODE = os.getenv("CSM_FAST_MODE", "0") == "1"
-FILTER_TOP_N = int(os.getenv("CSM_FILTER_TOP_N", "35" if FAST_MODE else "45"))
-EMBEDDED_TARGET_N = int(os.getenv("CSM_EMBEDDED_TARGET_N", "10" if FAST_MODE else "12"))
-THRESHOLD_MIN = float(os.getenv("CSM_THRESHOLD_MIN", "0.05"))
-THRESHOLD_MAX = float(os.getenv("CSM_THRESHOLD_MAX", "0.45"))
-THRESHOLD_GRID_SIZE = int(os.getenv("CSM_THRESHOLD_GRID_SIZE", "21" if FAST_MODE else "41"))
-THRESHOLD_GRID = np.linspace(THRESHOLD_MIN, THRESHOLD_MAX, THRESHOLD_GRID_SIZE)
-PCA_COMPONENTS = int(os.getenv("CSM_PCA_COMPONENTS", "2"))
-CLUSTER_COUNT = int(os.getenv("CSM_CLUSTER_COUNT", "4"))
+cfg = Config()
 
 
-def get_cv_splits(y):
-    """
-    Returns a valid number of stratified CV folds based on the minority class size.
-    """
-    min_class_count = int(y.value_counts().min())
-    n_splits = min(5, min_class_count)
-    if n_splits < 2:
-        raise ValueError("Not enough class samples for CV.")
-    return n_splits
+def _candidate_factories() -> dict[str, callable]:
+    """Model factories for the free-feature-engineering comparison.
 
-
-def candidate_models(random_state=42):
+    ``hgb_base`` runs on the original 6 selected features to isolate how much
+    the engineered space helps.  All other models run on the full engineered set.
+    ``hgb_cautious`` is more regularised; ``hgb_expressive`` allows deeper trees.
     """
-    Creates the model candidates compared in the free-feature-engineering experiment.
-    """
-    models = {
+    factories: dict[str, callable] = {
         "hgb_base": lambda: HistGradientBoostingClassifier(
-            random_state=random_state,
-            max_iter=240,
-            learning_rate=0.05,
-            min_samples_leaf=20,
-            max_leaf_nodes=63,
+            random_state=cfg.random_state, max_iter=240, learning_rate=0.05,
+            min_samples_leaf=20, max_leaf_nodes=63,
         ),
-        "hgb_engineered_cautious": lambda: HistGradientBoostingClassifier(
-            random_state=random_state,
-            max_iter=320,
-            learning_rate=0.03,
-            min_samples_leaf=40,
-            max_leaf_nodes=63,
+        "hgb_cautious": lambda: HistGradientBoostingClassifier(
+            random_state=cfg.random_state, max_iter=320, learning_rate=0.03,
+            min_samples_leaf=40, max_leaf_nodes=63,
         ),
-        "hgb_engineered_expressive": lambda: HistGradientBoostingClassifier(
-            random_state=random_state,
-            max_iter=280,
-            learning_rate=0.05,
-            min_samples_leaf=12,
-            max_leaf_nodes=127,
+        "hgb_expressive": lambda: HistGradientBoostingClassifier(
+            random_state=cfg.random_state, max_iter=280, learning_rate=0.05,
+            min_samples_leaf=12, max_leaf_nodes=127,
         ),
-        "rf_engineered": lambda: RandomForestClassifier(
-            random_state=random_state,
-            n_estimators=300 if FAST_MODE else 500,
-            min_samples_leaf=8,
-            min_samples_split=10,
-            max_depth=6,
-            max_features=0.5,
-            n_jobs=-1,
+        "rf": lambda: RandomForestClassifier(
+            random_state=cfg.random_state,
+            n_estimators=cfg.rf_estimators // 2 if cfg.fast_mode else cfg.rf_estimators,
+            min_samples_leaf=8, min_samples_split=10, max_depth=6, max_features=0.5, n_jobs=-1,
         ),
-        "logreg_engineered": lambda: Pipeline(
-            steps=[
-                ("scaler", StandardScaler()),
-                (
-                    "model",
-                    LogisticRegression(
-                        C=0.5,
-                        penalty="l2",
-                        max_iter=3000,
-                        class_weight="balanced",
-                        solver="lbfgs",
-                        random_state=random_state,
-                    ),
-                ),
-            ]
-        ),
+        "lr": lambda: logistic_pipeline(C=0.5, class_weight="balanced", random_state=cfg.random_state),
     }
-    return models
+    if cfg.fast_mode:
+        factories.pop("lr")
+        factories.pop("hgb_expressive")
+    return factories
 
 
-def find_best_threshold(y, y_pred_proba, num_vars):
-    """
-    Finds the threshold that maximizes campaign profit for given probabilities.
-    """
-    best_threshold = THRESHOLD_GRID[0]
-    best_profit = -np.inf
-    for threshold in THRESHOLD_GRID:
-        profit = calculate_profit(
-            y_true=y,
-            y_pred_proba=y_pred_proba,
-            threshold=threshold,
-            num_vars=num_vars,
-            max_offers=MAX_OFFERS,
-        )
-        if profit > best_profit:
-            best_profit = profit
-            best_threshold = threshold
-    return best_threshold, best_profit
-
-
-def evaluate_model(factory, X, y, num_vars):
-    """
-    Evaluates a model with out-of-fold probabilities and profit-based threshold search.
-    """
-    cv = StratifiedKFold(n_splits=get_cv_splits(y), shuffle=True, random_state=42)
-    oof_pred_proba = np.zeros(len(y), dtype=float)
-
-    for train_idx, valid_idx in cv.split(X, y):
-        model = factory()
-        model.fit(X.iloc[train_idx], y.iloc[train_idx])
-        oof_pred_proba[valid_idx] = model.predict_proba(X.iloc[valid_idx])[:, 1]
-
-    return find_best_threshold(y, oof_pred_proba, num_vars=num_vars)
-
-
-def main():
-    """
-    Runs the free-feature-engineering experiment and exports the best submission variant.
-    """
-    logger.info("Running interaction-feature approach...")
+def main() -> None:
+    """Free feature engineering experiment: derived features vs. base model."""
     logger.info(
-        "Runtime config | fast_mode=%s | threshold_range=[%0.3f, %0.3f] | threshold_grid=%d | pca_components=%d | clusters=%d",
-        FAST_MODE,
-        THRESHOLD_MIN,
-        THRESHOLD_MAX,
-        THRESHOLD_GRID_SIZE,
-        PCA_COMPONENTS,
-        CLUSTER_COUNT,
+        "interactions pipeline | fast=%s | pca=%d | clusters=%d | thr_grid=%d",
+        cfg.fast_mode, cfg.pca_components, cfg.cluster_count, len(cfg.threshold_grid),
     )
+
     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
     X_train, y_train, X_test = load_project_data(data_dir=data_dir)
     y = y_train.iloc[:, 0]
 
-    selector = ProfitDrivenFeatureSelector(
-        filter_top_n=FILTER_TOP_N,
-        embedded_target_n=EMBEDDED_TARGET_N,
-        feature_cost=200,
-        max_offers=MAX_OFFERS,
-    )
+    selector = ProfitDrivenFeatureSelector(**cfg.selector_kwargs)
     selector.fit(X_train, y)
-
-    selected_features = selector.selected_features_
-    if not selected_features:
-        logger.warning("No profitable feature subset selected. Exiting.")
+    features = selector.selected_features_
+    if not features:
+        logger.warning("No profitable features selected. Exiting.")
         return
 
-    X_train_base = X_train[selected_features]
-    X_test_base = X_test[selected_features]
-    X_train_engineered, X_test_engineered = build_free_engineered_features(
-        X_train_base=X_train_base,
-        X_test_base=X_test_base,
-        selected_features=selected_features,
-        n_pca_components=PCA_COMPONENTS,
-        n_clusters=CLUSTER_COUNT,
+    X_tr_base = X_train[features]
+    X_te_base = X_test[features]
+    X_tr_eng, X_te_eng = build_free_engineered_features(
+        X_tr_base, X_te_base, features,
+        n_pca_components=cfg.pca_components, n_clusters=cfg.cluster_count,
     )
+    logger.info("Base features: %d | engineered: %d", X_tr_base.shape[1], X_tr_eng.shape[1])
 
-    logger.info(
-        "Base features: %d | engineered feature space: %d",
-        X_train_base.shape[1],
-        X_train_engineered.shape[1],
-    )
-
-    models = candidate_models(random_state=42)
-    model_inputs = {
-        "hgb_base": (X_train_base, X_test_base),
-        "hgb_engineered_cautious": (X_train_engineered, X_test_engineered),
-        "hgb_engineered_expressive": (X_train_engineered, X_test_engineered),
-        "rf_engineered": (X_train_engineered, X_test_engineered),
-        "logreg_engineered": (X_train_engineered, X_test_engineered),
+    # hgb_base runs on original features; all others on the engineered space.
+    inputs = {
+        "hgb_base":       (X_tr_base, X_te_base),
+        "hgb_cautious":   (X_tr_eng,  X_te_eng),
+        "hgb_expressive": (X_tr_eng,  X_te_eng),
+        "rf":             (X_tr_eng,  X_te_eng),
+        "lr":             (X_tr_eng,  X_te_eng),
     }
 
-    if FAST_MODE:
-        models = {
-            name: factory for name, factory in models.items()
-            if name not in {"logreg_engineered", "hgb_engineered_expressive"}
-        }
-
-    best_model_name = None
-    best_threshold = None
-    best_profit = -np.inf
-
-    for model_name, factory in models.items():
-        X_train_current, _ = model_inputs[model_name]
-        threshold, profit = evaluate_model(
-            factory=factory,
-            X=X_train_current,
-            y=y,
-            num_vars=len(selected_features),
+    best_name, best_threshold, best_profit = None, None, -float("inf")
+    for name, factory in _candidate_factories().items():
+        X_in, _ = inputs[name]
+        oof = oof_predict_proba(factory, X_in, y)
+        threshold, profit = find_best_threshold(
+            y, oof, len(features), cfg.threshold_grid, cfg.max_offers
         )
-        logger.info("Model %s | CV-profit=%0.0f | threshold=%0.3f", model_name, profit, threshold)
-
+        logger.info("Model %s | CV profit=%0.0f | threshold=%0.3f", name, profit, threshold)
         if profit > best_profit:
-            best_profit = profit
-            best_threshold = threshold
-            best_model_name = model_name
+            best_profit, best_threshold, best_name = profit, threshold, name
 
     logger.info(
-        "Best model: %s | CV-profit=%0.0f | threshold=%0.3f",
-        best_model_name,
-        best_profit,
-        best_threshold,
+        "Best: %s | CV profit=%0.0f | threshold=%0.3f", best_name, best_profit, best_threshold
     )
 
-    final_model = models[best_model_name]()
-    X_train_best, X_test_best = model_inputs[best_model_name]
-    final_model.fit(X_train_best, y)
-    y_test_pred_proba = final_model.predict_proba(X_test_best)[:, 1]
-
+    X_tr_final, X_te_final = inputs[best_name]
+    final = _candidate_factories()[best_name]()
+    final.fit(X_tr_final, y)
     top_indices = select_offer_indices(
-        y_pred_proba=y_test_pred_proba,
+        final.predict_proba(X_te_final)[:, 1],
         threshold=best_threshold,
-        max_offers=MAX_OFFERS,
+        max_offers=cfg.max_offers,
     )
-    submission_indices = top_indices + 1
-
-    raw_var_indices = [
-        int(feature.replace("V", "")) for feature in selected_features
-    ] if all(feature.startswith("V") for feature in selected_features) else selected_features
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    obs_file = os.path.join(project_root, f"{TEAM_NAME}_interactions_obs.txt")
-    vars_file = os.path.join(project_root, f"{TEAM_NAME}_interactions_vars.txt")
-
-    pd.Series(submission_indices).to_csv(obs_file, index=False, header=False)
-    pd.DataFrame(raw_var_indices).to_csv(vars_file, index=False, header=False)
-
-    logger.info("Submission files written:")
-    logger.info("Observations: %s", obs_file)
-    logger.info("Variables:    %s", vars_file)
-    logger.info("Selected customers: %d", len(submission_indices))
+    write_submission(top_indices + 1, features, project_root, cfg.team_name, suffix="interactions")
 
 
 if __name__ == "__main__":
