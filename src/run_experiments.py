@@ -72,7 +72,7 @@ def run_experiment(
     features = selector.selected_features_
 
     logger.info(
-        "[%s] %d features selected: %s | SFS profit: %,.0f EUR",
+        "[%s] %d features selected: %s | SFS profit: %.0f EUR",
         name, len(features), features, selector.expected_profit_,
     )
 
@@ -82,7 +82,7 @@ def run_experiment(
     best_params, _, tuned_profit = tune_hgb_for_profit(
         X_train[features], y_train, num_vars=len(features), config=cfg,
     )
-    logger.info("[%s] Tuned CV profit: %,.0f EUR", name, tuned_profit)
+    logger.info("[%s] Tuned CV profit: %.0f EUR", name, tuned_profit)
     return {"name": name, "profit": tuned_profit, "features": features, "params": best_params}
 
 
@@ -97,13 +97,13 @@ def main() -> None:
     logger.info("Experiment summary:")
     for r in results:
         logger.info(
-            "  %s | features=%d | profit=%,.0f EUR",
+            "  %s | features=%d | profit=%.0f EUR",
             r["name"], len(r["features"]), r["profit"],
         )
 
     best = max(results, key=lambda r: r["profit"])
     logger.info(
-        "Winner: %s | profit=%,.0f EUR | features=%s",
+        "Winner: %s | profit=%.0f EUR | features=%s",
         best["name"], best["profit"], best["features"],
     )
 

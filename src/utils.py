@@ -56,13 +56,21 @@ def find_best_threshold(
     num_vars: int,
     threshold_grid: npt.ArrayLike,
     max_offers: int = 1000,
+    margin: float = 0.0,
 ) -> tuple[float, float]:
-    """Return (threshold, profit) that maximise campaign profit on *threshold_grid*."""
+    """Return ``(threshold, profit)`` that maximise campaign profit on *threshold_grid*.
+
+    *margin* shifts the selected threshold upward (e.g. 0.02) to reduce the
+    false-positive rate on unseen data at the cost of a slightly lower TP count.
+    """
     best_t, best_p = float(threshold_grid[0]), -np.inf  # type: ignore[index]
     for t in threshold_grid:
         p = calculate_profit(y, y_pred_proba, threshold=float(t), num_vars=num_vars, max_offers=max_offers)
         if p > best_p:
             best_p, best_t = p, float(t)
+    if margin:
+        best_t = float(np.clip(best_t + margin, 0.0, 1.0))
+        best_p = calculate_profit(y, y_pred_proba, threshold=best_t, num_vars=num_vars, max_offers=max_offers)
     return best_t, best_p
 
 
@@ -82,7 +90,7 @@ def logistic_pipeline(
     ])
 
 
-def calibrate(estimator: object, n_folds: int) -> CalibratedClassifierCV:
+def calibrate(estimator: object, n_folds: int | None = None) -> CalibratedClassifierCV:
     """Wrap estimator with Platt (sigmoid) probability calibration."""
     return CalibratedClassifierCV(estimator=estimator, method="sigmoid", cv=n_folds)
 

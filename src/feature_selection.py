@@ -25,8 +25,10 @@ class ProfitDrivenFeatureSelector:
     1. Filter — keeps the top-n features by Random Forest importance.
     2. Embedded — re-ranks survivors with a deeper RF and retains at most
        *embedded_target_n* features.
-    3. Wrapper — Sequential Forward Selection driven by 5-fold CV profit,
-       stopping when adding any further variable reduces expected score.
+    3. Wrapper — Sequential Forward Selection driven by repeated stratified
+       CV profit, stopping when adding any further variable reduces expected
+       score.  Profit is evaluated in ranking mode (threshold = −∞) to avoid
+       threshold-optimisation bias during feature selection.
     """
 
     def __init__(
@@ -37,6 +39,8 @@ class ProfitDrivenFeatureSelector:
         max_offers: int = 1000,
         random_state: int = 42,
         corr_threshold: float = 0.85,
+        sfs_n_repeats: int = 3,
+        sfs_cv_folds: int = 5,
     ) -> None:
         self.filter_top_n = filter_top_n
         self.embedded_target_n = embedded_target_n
@@ -44,6 +48,8 @@ class ProfitDrivenFeatureSelector:
         self.max_offers = max_offers
         self.random_state = random_state
         self.corr_threshold = corr_threshold
+        self.sfs_n_repeats = sfs_n_repeats
+        self.sfs_cv_folds = sfs_cv_folds
         self.selected_features_: list[str] = []
         self.expected_profit_: float = 0.0
         self.profit_history_: list[tuple[int, float]] = []
@@ -67,9 +73,7 @@ class ProfitDrivenFeatureSelector:
 
     def _step0_remove_correlated(self, X: pd.DataFrame) -> list[str]:
         """Drop one variable from each highly-correlated pair (Spearman |r| > threshold)."""
-        logger.info(
-            "Stage 0: correlation filter (threshold=%.2f)", self.corr_threshold
-        )
+        logger.info("Stage 0: correlation filter (threshold=%.2f)", self.corr_threshold)
         corr = X.corr(method="spearman").abs()
         upper = corr.where(np.triu(np.ones(corr.shape), k=1).astype(bool))
         to_drop = [col for col in upper.columns if any(upper[col] > self.corr_threshold)]
@@ -115,9 +119,11 @@ class ProfitDrivenFeatureSelector:
     def _step3_wrapper(
         self, X: pd.DataFrame, y: pd.Series, candidates: list[str]
     ) -> tuple[list[str], float]:
-        """Sequential Forward Selection driven by 5-fold CV profit."""
-        logger.info("Stage 3: SFS wrapper (profit-optimised)")
-        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=self.random_state)
+        """Sequential Forward Selection driven by repeated CV profit (ranking mode)."""
+        logger.info(
+            "Stage 3: SFS wrapper (repeats=%d, folds=%d)",
+            self.sfs_n_repeats, self.sfs_cv_folds,
+        )
 
         best_profit = -np.inf
         current: list[str] = []
@@ -125,7 +131,7 @@ class ProfitDrivenFeatureSelector:
 
         while available:
             profits = [
-                (self._cv_profit(X, y, cv, current + [feat]), feat)
+                (self._mean_cv_profit(X, y, current + [feat]), feat)
                 for feat in available
             ]
             best_candidate_profit, top_feat = max(profits, key=lambda x: x[0])
@@ -135,17 +141,30 @@ class ProfitDrivenFeatureSelector:
                 best_profit = best_candidate_profit
                 current.append(top_feat)
                 available.remove(top_feat)
-                logger.info(
-                    "Added '%s' | CV profit: %,.0f EUR", top_feat, best_profit
-                )
+                logger.info("Added '%s' | CV profit: %.0f EUR", top_feat, best_profit)
             else:
                 logger.info(
-                    "Optimum reached — '%s' would reduce profit to %,.0f EUR.",
+                    "Optimum reached — '%s' would reduce profit to %.0f EUR.",
                     top_feat, best_candidate_profit,
                 )
                 break
 
         return current, best_profit
+
+    def _mean_cv_profit(self, X: pd.DataFrame, y: pd.Series, subset: list[str]) -> float:
+        """Average CV profit over *sfs_n_repeats* random seeds for stable estimates."""
+        return float(np.mean([
+            self._cv_profit(
+                X, y,
+                StratifiedKFold(
+                    n_splits=self.sfs_cv_folds,
+                    shuffle=True,
+                    random_state=self.random_state + i,
+                ),
+                subset,
+            )
+            for i in range(self.sfs_n_repeats)
+        ]))
 
     def _cv_profit(
         self,
@@ -154,11 +173,12 @@ class ProfitDrivenFeatureSelector:
         cv: StratifiedKFold,
         subset: list[str],
     ) -> float:
-        """Average OOF profit for subset, penalised by variable cost.
+        """CV profit for *subset* in ranking mode, scaled to full-dataset units.
 
-        max_offers is scaled to fold size (max_offers // n_splits) so that the
-        fraction of customers contacted matches the deployment constraint, then
-        scaled back up to full-dataset units before averaging.
+        Ranking mode (threshold=−∞) selects the top ``max_offers / n_folds``
+        customers by score in each fold, avoiding threshold-optimisation bias
+        during feature selection.  Profit is scaled back by *n_folds* so the
+        penalty comparison (``len(subset) * feature_cost``) is meaningful.
         """
         model = HistGradientBoostingClassifier(
             random_state=self.random_state, max_iter=100
@@ -170,9 +190,9 @@ class ProfitDrivenFeatureSelector:
             preds = model.predict_proba(X.iloc[val_idx][subset])[:, 1]
             fold_profit = calculate_profit(
                 y.iloc[val_idx], preds,
+                threshold=-np.inf,      # rank-only: no threshold-optimism bias
                 num_vars=0,
                 max_offers=fold_max_offers,
             )
-            # Scale back to full-dataset units so the penalty comparison is meaningful.
             fold_profits.append(fold_profit * cv.n_splits)
         return float(np.mean(fold_profits)) - len(subset) * self.feature_cost

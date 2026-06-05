@@ -5,7 +5,7 @@ import os
 
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
-from sklearn.model_selection import ParameterSampler
+from sklearn.model_selection import ParameterSampler, StratifiedKFold
 
 from .config import Config
 from .data_loader import load_project_data
@@ -21,8 +21,20 @@ from .utils import (
 )
 from .visualization import plot_profit_curve
 
-# Alias kept for notebook compatibility.
-build_calibrated_model = calibrate
+
+def build_calibrated_model(estimator: object, n_folds: int | None = None, cv_splits: int | None = None) -> object:
+    """Notebook-compatibility wrapper for :func:`calibrate`.
+
+    Accepts either ``n_folds=`` or ``cv_splits=`` so existing notebooks that
+    use either spelling continue to work without modification.
+    """
+    return calibrate(estimator, n_folds=n_folds or cv_splits)
+
+try:
+    from lightgbm import LGBMClassifier as _LGBMClassifier
+    _LGBM_AVAILABLE = True
+except ImportError:
+    _LGBM_AVAILABLE = False
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,6 +66,31 @@ RF_CONFIG = {
 LR_C = 0.2
 
 
+def _ensemble_factories(best_hgb_params: dict, config: Config) -> dict[str, callable]:
+    """All model factories for the ensemble, including LightGBM when available."""
+    factories: dict[str, callable] = {
+        "hgb": lambda: HistGradientBoostingClassifier(
+            random_state=config.random_state, **best_hgb_params
+        ),
+        "rf": lambda: RandomForestClassifier(
+            random_state=config.random_state, n_jobs=-1, **RF_CONFIG
+        ),
+        "lr": lambda: logistic_pipeline(C=LR_C, class_weight="balanced"),
+    }
+    if _LGBM_AVAILABLE:
+        n_est = 200 if config.fast_mode else 400
+        factories["lgbm"] = lambda: _LGBMClassifier(
+            random_state=config.random_state,
+            n_estimators=n_est,
+            learning_rate=0.05,
+            num_leaves=31,
+            min_child_samples=20,
+            verbose=-1,
+        )
+        logger.info("LightGBM available — added to ensemble.")
+    return factories
+
+
 def tune_hgb_for_profit(
     X: object,
     y: object,
@@ -76,7 +113,9 @@ def tune_hgb_for_profit(
             lambda p=params: HistGradientBoostingClassifier(random_state=c.random_state, **p),
             X, y, random_state=c.random_state,
         )
-        threshold, profit = find_best_threshold(y, oof, num_vars, c.threshold_grid, c.max_offers)
+        threshold, profit = find_best_threshold(
+            y, oof, num_vars, c.threshold_grid, c.max_offers, margin=c.threshold_margin,
+        )
         logger.info(
             "[HGB %02d/%02d] CV profit=%0.0f | threshold=%0.3f | params=%s",
             i, len(candidates), profit, threshold, params,
@@ -114,34 +153,49 @@ def _evaluate_ensemble(
     best_hgb_params: dict,
     num_vars: int,
     config: Config | None = None,
-) -> tuple[str, float, float]:
-    """Compare HGB-only vs soft-voting ensemble using OOF profit."""
+) -> tuple[str, float, float, dict[str, float]]:
+    """Compare HGB-only vs profit-proportional soft ensemble using OOF profit.
+
+    Returns ``(strategy, threshold, cv_profit, weights)``.
+    """
     c = config or cfg
-    hgb_oof = oof_predict_proba(
-        lambda: HistGradientBoostingClassifier(random_state=c.random_state, **best_hgb_params),
-        X, y, random_state=c.random_state,
-    )
-    rf_oof = oof_predict_proba(
-        lambda: RandomForestClassifier(random_state=c.random_state, n_jobs=-1, **RF_CONFIG),
-        X, y, random_state=c.random_state,
-    )
-    lr_oof = oof_predict_proba(
-        lambda: logistic_pipeline(C=LR_C, class_weight="balanced"),
-        X, y, random_state=c.random_state,
+    factories = _ensemble_factories(best_hgb_params, c)
+
+    oof_preds: dict[str, np.ndarray] = {}
+    solo_profits: dict[str, float] = {}
+    for name, factory in factories.items():
+        oof = oof_predict_proba(factory, X, y, random_state=c.random_state)
+        oof_preds[name] = oof
+        _, p = find_best_threshold(
+            y, oof, num_vars, c.threshold_grid, c.max_offers, margin=c.threshold_margin,
+        )
+        solo_profits[name] = p
+        logger.info("Model %-6s | standalone CV profit=%0.0f", name, p)
+
+    # HGB-only benchmark (already computed above).
+    hgb_t, hgb_p = find_best_threshold(
+        y, oof_preds["hgb"], num_vars, c.threshold_grid, c.max_offers, margin=c.threshold_margin,
     )
 
-    hgb_t, hgb_p = find_best_threshold(y, hgb_oof, num_vars, c.threshold_grid, c.max_offers)
+    # Profit-proportional weights — models that perform better get more weight.
+    raw_w = {k: max(v, 1.0) for k, v in solo_profits.items()}
+    w_sum = sum(raw_w.values()) or float(len(raw_w))
+    norm_w = {k: v / w_sum for k, v in raw_w.items()}
 
-    w = c.ensemble_weights
-    ens_oof = w["hgb"] * hgb_oof + w["rf"] * rf_oof + w["lr"] * lr_oof
-    ens_t, ens_p = find_best_threshold(y, ens_oof, num_vars, c.threshold_grid, c.max_offers)
+    ens_oof = sum(w * oof_preds[k] for k, w in norm_w.items())
+    ens_t, ens_p = find_best_threshold(
+        y, ens_oof, num_vars, c.threshold_grid, c.max_offers, margin=c.threshold_margin,
+    )
 
     logger.info("Strategy HGB-only  | CV profit=%0.0f | threshold=%0.3f", hgb_p, hgb_t)
-    logger.info("Strategy Ensemble  | CV profit=%0.0f | threshold=%0.3f", ens_p, ens_t)
+    logger.info(
+        "Strategy Ensemble  | CV profit=%0.0f | threshold=%0.3f | weights=%s",
+        ens_p, ens_t, {k: round(v, 3) for k, v in norm_w.items()},
+    )
 
     if ens_p > hgb_p:
-        return "ensemble", ens_t, ens_p
-    return "hgb", hgb_t, hgb_p
+        return "ensemble", ens_t, ens_p, norm_w
+    return "hgb", hgb_t, hgb_p, {"hgb": 1.0}
 
 
 def _predict_test(
@@ -150,35 +204,105 @@ def _predict_test(
     X_test: object,
     best_hgb_params: dict,
     strategy: str,
+    weights: dict[str, float],
     config: Config | None = None,
 ) -> np.ndarray:
     """Fit the chosen strategy on full training data and return test probabilities."""
     c = config or cfg
-    hgb = HistGradientBoostingClassifier(random_state=c.random_state, **best_hgb_params)
-    rf = RandomForestClassifier(random_state=c.random_state, n_jobs=-1, **RF_CONFIG)
-    lr = logistic_pipeline(C=LR_C, class_weight="balanced")
+    factories = _ensemble_factories(best_hgb_params, c)
 
     if strategy == "ensemble":
-        hgb.fit(X_train, y)
-        rf.fit(X_train, y)
-        lr.fit(X_train, y)
-        w = c.ensemble_weights
-        return (
-            w["hgb"] * hgb.predict_proba(X_test)[:, 1]
-            + w["rf"] * rf.predict_proba(X_test)[:, 1]
-            + w["lr"] * lr.predict_proba(X_test)[:, 1]
-        )
+        result = np.zeros(len(X_test))
+        for name, w in weights.items():
+            model = factories[name]()
+            model.fit(X_train, y)
+            result += w * model.predict_proba(X_test)[:, 1]
+        return result
 
+    hgb = factories["hgb"]()
     final = calibrate(hgb, n_folds=cv_splits(y))
     final.fit(X_train, y)
     return final.predict_proba(X_test)[:, 1]
 
 
+def nested_cv_profit_estimate(
+    X: object,
+    y: object,
+    n_outer_folds: int = 3,
+    config: Config | None = None,
+) -> float:
+    """Unbiased profit estimate via nested CV.
+
+    Each outer fold runs the full 4-stage feature selection on training data
+    only, then evaluates on the held-out fold — so Stage 1-2 (supervised RF
+    filter) never sees the validation labels.  This eliminates the leakage
+    present when feature selection is done once on the full dataset.
+
+    Returns mean profit scaled to the full dataset size.
+
+    Warning: ~n_outer_folds times slower than a single pipeline run.
+    """
+    c = config or cfg
+    outer_cv = StratifiedKFold(
+        n_splits=n_outer_folds, shuffle=True, random_state=c.random_state,
+    )
+    fold_profits: list[float] = []
+
+    for fold_i, (train_idx, val_idx) in enumerate(outer_cv.split(X, y), start=1):
+        X_tr = X.iloc[train_idx]
+        y_tr = y.iloc[train_idx]
+        X_val = X.iloc[val_idx]
+        y_val = y.iloc[val_idx]
+
+        logger.info(
+            "Nested CV fold %d/%d — running full feature selection on %d samples…",
+            fold_i, n_outer_folds, len(train_idx),
+        )
+        selector = ProfitDrivenFeatureSelector(**c.selector_kwargs)
+        selector.fit(X_tr, y_tr)
+        features = selector.selected_features_
+
+        if not features:
+            logger.warning("Fold %d: no features selected — profit=0.", fold_i)
+            fold_profits.append(0.0)
+            continue
+
+        model = HistGradientBoostingClassifier(
+            random_state=c.random_state, max_iter=200,
+        )
+        model.fit(X_tr[features], y_tr)
+        preds = model.predict_proba(X_val[features])[:, 1]
+
+        # Scale max_offers proportionally to the fold size.
+        fold_max_offers = int(c.max_offers * len(val_idx) / len(y))
+        _, fold_profit = find_best_threshold(
+            y_val, preds, len(features), c.threshold_grid,
+            max_offers=fold_max_offers, margin=c.threshold_margin,
+        )
+        # Scale profit back to full-dataset units.
+        scaled = fold_profit * n_outer_folds
+        fold_profits.append(scaled)
+        logger.info(
+            "Fold %d/%d: features=%s | fold profit=%.0f EUR (scaled=%.0f EUR)",
+            fold_i, n_outer_folds, features, fold_profit, scaled,
+        )
+
+    mean_p = float(np.mean(fold_profits))
+    std_p = float(np.std(fold_profits))
+    logger.info(
+        "Nested CV unbiased profit estimate: %.0f ± %.0f EUR (folds=%s)",
+        mean_p, std_p, [round(p) for p in fold_profits],
+    )
+    return mean_p
+
+
 def main() -> None:
     """Main pipeline: feature selection → HGB tuning → strategy selection → submission."""
     logger.info(
-        "Starting pipeline | fast_mode=%s | filter_n=%d | embedded_n=%d | param_iter=%d",
-        cfg.fast_mode, cfg.filter_top_n, cfg.embedded_target_n, cfg.param_search_iter,
+        "Starting pipeline | fast_mode=%s | filter_n=%d | embedded_n=%d"
+        " | param_iter=%d | sfs_repeats=%d | margin=%.2f",
+        cfg.fast_mode, cfg.filter_top_n, cfg.embedded_target_n,
+        cfg.param_search_iter, cfg.sfs_n_repeats, cfg.threshold_margin,
     )
 
     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
@@ -194,14 +318,24 @@ def main() -> None:
     X_tr = X_train[features]
     X_te = X_test[features]
 
+    # Unbiased profit estimate: feature selection re-run inside each outer fold
+    # so Stage 1-2 (supervised RF filter) never leaks validation labels.
+    logger.info(
+        "Running nested CV for unbiased profit estimate (3 outer folds)…"
+        " This takes ~3x longer than a single run."
+    )
+    nested_cv_profit_estimate(X_train, y, n_outer_folds=3)
+
     best_params, _, _ = tune_hgb_for_profit(X_tr, y, num_vars=len(features))
-    strategy, threshold, cv_profit = _evaluate_ensemble(X_tr, y, best_params, num_vars=len(features))
+    strategy, threshold, cv_profit, weights = _evaluate_ensemble(
+        X_tr, y, best_params, num_vars=len(features),
+    )
     logger.info(
         "Selected strategy: %s | CV profit=%0.0f | threshold=%0.3f",
         strategy, cv_profit, threshold,
     )
 
-    y_test_proba = _predict_test(X_tr, y, X_te, best_params, strategy)
+    y_test_proba = _predict_test(X_tr, y, X_te, best_params, strategy, weights)
     top_indices = select_offer_indices(y_test_proba, threshold=threshold, max_offers=cfg.max_offers)
     submission_indices = top_indices + 1
 
