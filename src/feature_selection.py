@@ -154,15 +154,25 @@ class ProfitDrivenFeatureSelector:
         cv: StratifiedKFold,
         subset: list[str],
     ) -> float:
-        """Average OOF profit for subset, penalised by variable cost."""
+        """Average OOF profit for subset, penalised by variable cost.
+
+        max_offers is scaled to fold size (max_offers // n_splits) so that the
+        fraction of customers contacted matches the deployment constraint, then
+        scaled back up to full-dataset units before averaging.
+        """
         model = HistGradientBoostingClassifier(
             random_state=self.random_state, max_iter=100
         )
+        fold_max_offers = self.max_offers // cv.n_splits
         fold_profits: list[float] = []
         for train_idx, val_idx in cv.split(X, y):
             model.fit(X.iloc[train_idx][subset], y.iloc[train_idx])
             preds = model.predict_proba(X.iloc[val_idx][subset])[:, 1]
-            fold_profits.append(
-                calculate_profit(y.iloc[val_idx], preds, num_vars=0, max_offers=self.max_offers)
+            fold_profit = calculate_profit(
+                y.iloc[val_idx], preds,
+                num_vars=0,
+                max_offers=fold_max_offers,
             )
+            # Scale back to full-dataset units so the penalty comparison is meaningful.
+            fold_profits.append(fold_profit * cv.n_splits)
         return float(np.mean(fold_profits)) - len(subset) * self.feature_cost
