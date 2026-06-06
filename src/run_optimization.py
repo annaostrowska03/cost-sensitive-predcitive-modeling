@@ -19,7 +19,7 @@ from .utils import (
     oof_predict_proba,
     write_submission,
 )
-from .visualization import plot_profit_curve
+from .visualization import plot_nested_cv_summary, plot_profit_curve
 
 
 def build_calibrated_model(estimator: object, n_folds: int | None = None, cv_splits: int | None = None) -> object:
@@ -321,6 +321,11 @@ def nested_cv_profit_estimate(
         )
         best_fold = int(np.argmax(fold_profits))
         stable = fold_features[best_fold]
+
+    plot_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "docs", "nested_cv_summary.png",
+    )
+    plot_nested_cv_summary(fold_profits, fold_features, stable, output_path=plot_path)
 
     return mean_p, stable
 
