@@ -24,12 +24,16 @@ Score = (TP × 10) − (FP × 5) − (num_variables × 200)
 
 | | |
 |---|---|
-| **Selected features** | V11, V160, V191, V215, V342, V380 (6 variables) |
-| **CV profit (biased)** | 5 065 EUR |
-| **CV profit (nested CV, unbiased)** | run `nested_cv_profit_estimate()` |
+| **Selected features** | V160, V191, V215 (3 variables — stability-selected) |
+| **Unbiased CV profit** (nested CV, 3 folds) | **2 510 ± 636 EUR** |
+| **OOF CV profit** (HGB on stable features) | 5 125 EUR *(biased — do not report)* |
 | **Strategy** | HGB-only (ensemble did not improve) |
 | **Decision threshold** | 0.170 |
 | **Submission** | 1 000 customers |
+
+The unbiased estimate comes from nested CV where feature selection (all 4 stages)
+runs independently inside each outer fold.  Features that appeared in ≥ 2/3 folds
+(V160, V191, V215) are used for the final model.  See `docs/nested_cv_summary.png`.
 
 ## Team
 

@@ -6,7 +6,8 @@ __pycache__/
 *.pyo
 
 # generated pipeline output files (not the final submission)
-ids_*.txt
+ids_*_obs.txt
+ids_*_vars.txt
 TODO_STUDENCI_IDS_*.txt
 test_run_*.txt
 
