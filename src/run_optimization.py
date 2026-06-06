@@ -229,24 +229,38 @@ def nested_cv_profit_estimate(
     X: object,
     y: object,
     n_outer_folds: int = 3,
+    min_fold_appearances: int = 2,
     config: Config | None = None,
-) -> float:
-    """Unbiased profit estimate via nested CV.
+    fast_inner: bool = False,
+) -> tuple[float, list[str]]:
+    """Unbiased profit estimate + stable feature set via nested CV.
 
     Each outer fold runs the full 4-stage feature selection on training data
     only, then evaluates on the held-out fold — so Stage 1-2 (supervised RF
-    filter) never sees the validation labels.  This eliminates the leakage
-    present when feature selection is done once on the full dataset.
+    filter) never sees the validation labels.
 
-    Returns mean profit scaled to the full dataset size.
+    Feature selection happens independently per fold.  Features that appear in
+    at least *min_fold_appearances* folds are considered stable and returned as
+    the recommended feature set for the final submission model.
 
-    Warning: ~n_outer_folds times slower than a single pipeline run.
+    Returns
+    -------
+    mean_profit : float
+        Unbiased profit estimate scaled to the full dataset size.
+    stable_features : list[str]
+        Features selected in >= *min_fold_appearances* outer folds.
     """
-    c = config or cfg
+    from collections import Counter
+
+    if fast_inner:
+        c = Config(fast_mode=True, sfs_n_repeats=1)
+    else:
+        c = config or cfg
     outer_cv = StratifiedKFold(
         n_splits=n_outer_folds, shuffle=True, random_state=c.random_state,
     )
     fold_profits: list[float] = []
+    fold_features: list[list[str]] = []
 
     for fold_i, (train_idx, val_idx) in enumerate(outer_cv.split(X, y), start=1):
         X_tr = X.iloc[train_idx]
@@ -261,6 +275,7 @@ def nested_cv_profit_estimate(
         selector = ProfitDrivenFeatureSelector(**c.selector_kwargs)
         selector.fit(X_tr, y_tr)
         features = selector.selected_features_
+        fold_features.append(features)
 
         if not features:
             logger.warning("Fold %d: no features selected — profit=0.", fold_i)
@@ -273,13 +288,11 @@ def nested_cv_profit_estimate(
         model.fit(X_tr[features], y_tr)
         preds = model.predict_proba(X_val[features])[:, 1]
 
-        # Scale max_offers proportionally to the fold size.
         fold_max_offers = int(c.max_offers * len(val_idx) / len(y))
         _, fold_profit = find_best_threshold(
             y_val, preds, len(features), c.threshold_grid,
             max_offers=fold_max_offers, margin=c.threshold_margin,
         )
-        # Scale profit back to full-dataset units.
         scaled = fold_profit * n_outer_folds
         fold_profits.append(scaled)
         logger.info(
@@ -293,11 +306,53 @@ def nested_cv_profit_estimate(
         "Nested CV unbiased profit estimate: %.0f ± %.0f EUR (folds=%s)",
         mean_p, std_p, [round(p) for p in fold_profits],
     )
-    return mean_p
+
+    # Stability selection: keep features that appear in >= min_fold_appearances folds.
+    counts = Counter(f for fs in fold_features for f in fs)
+    stable = [f for f, n in counts.most_common() if n >= min_fold_appearances]
+    logger.info(
+        "Stable features (appeared in >= %d/%d folds): %s",
+        min_fold_appearances, n_outer_folds, stable,
+    )
+    if not stable:
+        logger.warning(
+            "No stable features found — all features appeared in only 1 fold."
+            " Falling back to features from the best-profit fold."
+        )
+        best_fold = int(np.argmax(fold_profits))
+        stable = fold_features[best_fold]
+
+    return mean_p, stable
 
 
 def main() -> None:
-    """Main pipeline: feature selection → HGB tuning → strategy selection → submission."""
+    """End-to-end pipeline producing a leakage-free submission.
+
+    How the best model and features are chosen
+    -------------------------------------------
+    1. **Nested CV** (3 outer folds) — the full 4-stage feature selection runs
+       independently inside each fold on that fold's training data only.
+       This prevents Stage 1-2 (supervised RF filter) from seeing validation
+       labels, eliminating the classic 'CV after variable selection' bias.
+
+    2. **Stability selection** — features that appear in >= 2 of 3 folds are
+       kept.  This discards features that only looked useful on one particular
+       data split, reducing variance in the final feature set.
+
+    3. **HGB hyperparameter tuning** — randomised search over 24 configs,
+       scored by OOF CV profit on the stable features.  The config with the
+       highest profit is selected.
+
+    4. **Strategy selection** — HGB-only vs soft ensemble (HGB + RF + LR,
+       profit-proportional weights).  The strategy with higher OOF CV profit
+       is used for final predictions.
+
+    5. **Threshold** — grid search on OOF predictions [0.15 … 0.50] + 0.02
+       conservative margin to reduce false positives on unseen data.
+
+    The reported CV profit is the *unbiased* nested CV estimate, not the
+    in-sample figure which inflates due to feature pre-filtering.
+    """
     logger.info(
         "Starting pipeline | fast_mode=%s | filter_n=%d | embedded_n=%d"
         " | param_iter=%d | sfs_repeats=%d | margin=%.2f",
@@ -309,39 +364,49 @@ def main() -> None:
     X_train, y_train, X_test = load_project_data(data_dir=data_dir)
     y = y_train.iloc[:, 0]
 
-    selector = select_features(X_train, y)
-    features = selector.selected_features_
+    # Step 1+2: nested CV → unbiased profit estimate + stable feature set.
+    logger.info("Step 1/4 — nested CV feature selection (3 folds, ~3x runtime)…")
+    unbiased_profit, features = nested_cv_profit_estimate(X_train, y, n_outer_folds=3)
+
     if not features:
-        logger.warning("No profitable features found. Exiting.")
+        logger.warning("No stable features found. Exiting.")
         return
+
+    logger.info(
+        "Stable features (%d): %s | unbiased CV profit=%.0f EUR",
+        len(features), features, unbiased_profit,
+    )
 
     X_tr = X_train[features]
     X_te = X_test[features]
 
-    # Unbiased profit estimate: feature selection re-run inside each outer fold
-    # so Stage 1-2 (supervised RF filter) never leaks validation labels.
-    logger.info(
-        "Running nested CV for unbiased profit estimate (3 outer folds)…"
-        " This takes ~3x longer than a single run."
-    )
-    nested_cv_profit_estimate(X_train, y, n_outer_folds=3)
-
+    # Step 3: tune HGB on stable features.
+    logger.info("Step 2/4 — HGB hyperparameter tuning…")
     best_params, _, _ = tune_hgb_for_profit(X_tr, y, num_vars=len(features))
+
+    # Step 4: pick best strategy (HGB-only vs ensemble).
+    logger.info("Step 3/4 — strategy selection…")
     strategy, threshold, cv_profit, weights = _evaluate_ensemble(
         X_tr, y, best_params, num_vars=len(features),
     )
     logger.info(
-        "Selected strategy: %s | CV profit=%0.0f | threshold=%0.3f",
+        "Selected strategy: %s | OOF CV profit=%.0f EUR | threshold=%.3f",
         strategy, cv_profit, threshold,
     )
 
+    # Step 5: predict on test set and write submission.
+    logger.info("Step 4/4 — predicting and writing submission…")
     y_test_proba = _predict_test(X_tr, y, X_te, best_params, strategy, weights)
     top_indices = select_offer_indices(y_test_proba, threshold=threshold, max_offers=cfg.max_offers)
     submission_indices = top_indices + 1
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     write_submission(submission_indices, features, project_root, cfg.team_name)
-    logger.info("Selected %d customers.", len(submission_indices))
+
+    logger.info(
+        "Done. Selected %d customers | unbiased profit=%.0f EUR | features=%s",
+        len(submission_indices), unbiased_profit, features,
+    )
 
 
 if __name__ == "__main__":
