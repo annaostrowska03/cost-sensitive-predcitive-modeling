@@ -35,6 +35,60 @@ The unbiased estimate comes from nested CV where feature selection (all 4 stages
 runs independently inside each outer fold.  Features that appeared in ≥ 2/3 folds
 (V160, V191, V215) are used for the final model.  See `docs/nested_cv_summary.png`.
 
+## Methodology
+
+### How features are selected
+
+Feature selection uses a **4-stage funnel** that progressively narrows 500 variables down to a small profitable subset:
+
+| Stage | Method | Input → Output |
+|-------|--------|----------------|
+| 0 | Spearman correlation filter — drop one from each pair with \|r\| > 0.85 | 500 → ~490 |
+| 1 | Random Forest importance filter — keep top 55 by mean decrease in impurity | ~490 → 55 |
+| 2 | Embedded RF — deeper RF (300 trees), keep top 15 | 55 → ≤15 |
+| 3 | Sequential Forward Selection (SFS) — add one variable at a time while CV profit improves | ≤15 → final set |
+
+SFS uses **ranking mode** (threshold = −∞): instead of optimising a decision threshold during selection, it always picks the top-K customers by score.  This avoids inflating the feature score with threshold-fitting noise.  Each candidate is evaluated by averaging CV profit over 3 random seeds × 5 folds = 15 CV runs.
+
+### How overfitting is controlled
+
+Stages 1–2 are supervised (they see training labels), which would normally cause leakage if CV was run afterwards on the same data.  The pipeline addresses this with **nested cross-validation**:
+
+```
+Outer fold 1  ┌─ train (3333 obs) ─ run full 4-stage selection ─ fit model ─┐
+              └─ val  (1667 obs)  ─────────────────────────────── evaluate  ─┘
+Outer fold 2  ┌─ train (3333 obs) ─ run full 4-stage selection ─ fit model ─┐
+              └─ val  (1667 obs)  ─────────────────────────────── evaluate  ─┘
+Outer fold 3  (same)
+```
+
+Stages 1–2 never see the validation fold labels → the reported profit is **unbiased**.
+
+### How the final feature set is chosen (stability selection)
+
+Each outer fold independently selects a different feature subset.  Only features that appear in **≥ 2 out of 3 folds** are kept for the final model.  This discards features that looked useful on one particular data split but are likely noise.
+
+Current stable features: **V160, V191, V215**
+
+### How the model and threshold are chosen
+
+1. **HGB hyperparameter tuning** — randomised search over 24 configurations of `HistGradientBoostingClassifier`, each scored by out-of-fold (OOF) CV profit on the stable features.  The configuration with the highest OOF profit is selected.
+
+2. **Strategy selection** — OOF profit of HGB-only is compared against a soft ensemble (HGB + Random Forest + Logistic Regression with profit-proportional weights).  The better strategy is used.
+
+3. **Decision threshold** — grid search over [0.15 … 0.50] on OOF predictions, plus a **conservative margin of +0.02** to reduce false positives on unseen data.
+
+### What profit to report
+
+| Estimate | Value | Meaning |
+|----------|-------|---------|
+| Nested CV (unbiased) | **2 510 ± 636 EUR** | Expected profit on truly unseen data |
+| OOF CV on stable features | 5 125 EUR | Biased — do not report as expected performance |
+
+The gap between the two numbers reflects leakage from feature pre-filtering (Stages 1–2) on the full dataset.  The nested CV estimate is the correct figure to report.
+
+---
+
 ## Team
 
 - [Anna Ostrowska](https://github.com/annaostrowska03)
