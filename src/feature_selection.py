@@ -7,7 +7,7 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.model_selection import StratifiedKFold
 
-from .evaluation import calculate_profit
+from .utils import calculate_profit
 
 logger = logging.getLogger(__name__)
 

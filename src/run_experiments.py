@@ -17,11 +17,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
 from .config import Config
-from .data_loader import load_project_data
-from .evaluation import select_offer_indices
 from .feature_selection import ProfitDrivenFeatureSelector
 from .run_optimization import tune_hgb_for_profit
-from .utils import calibrate, cv_splits, write_submission
+from .utils import calibrate, cv_splits, write_submission, load_project_data, select_offer_indices
 
 cfg = Config()
 

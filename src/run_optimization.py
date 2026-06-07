@@ -8,10 +8,10 @@ from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassif
 from sklearn.model_selection import ParameterSampler, StratifiedKFold
 
 from .config import Config
-from .data_loader import load_project_data
-from .evaluation import select_offer_indices
 from .feature_selection import ProfitDrivenFeatureSelector
 from .utils import (
+    load_project_data,
+    select_offer_indices,
     calibrate,
     cv_splits,
     find_best_threshold,
