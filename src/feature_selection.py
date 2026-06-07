@@ -26,9 +26,9 @@ class ProfitDrivenFeatureSelector:
     2. Embedded — re-ranks survivors with a deeper RF and retains at most
        *embedded_target_n* features.
     3. Wrapper — Sequential Forward Selection driven by repeated stratified
-       CV profit, stopping when adding any further variable reduces expected
-       score.  Profit is evaluated in ranking mode (threshold = −∞) to avoid
-       threshold-optimisation bias during feature selection.
+        CV profit, stopping when adding any further variable reduces expected
+        score.  Profit is evaluated in ranking mode (threshold = −∞) to avoid
+        threshold-optimisation bias during feature selection.
     """
 
     def __init__(

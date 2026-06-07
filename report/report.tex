@@ -54,7 +54,7 @@ available campaign slots.
 
 \section{Problem Formulation}
 
-A bank wants to contact up to $N_{\max} = 1\,000$ customers from a pool of 5\,000 with a
+We want to contact up to $N_{\max} = 1\,000$ customers from a pool of 5\,000 with a
 product offer. Every customer who converts yields +10 EUR; every incorrect contact causes
 Marketing Fatigue and costs $-$5 EUR. Additionally, each feature used by the model incurs a
 flat 200 EUR data-acquisition fee. The resulting scoring rule is
@@ -71,12 +71,11 @@ This is positive when $\hat{p} > \frac{1}{3}$, giving the break-even threshold.
 When more than 1\,000 customers exceed this threshold, we rank by $\hat{p}$ and select the
 top~1\,000, since ranking by expected gain is equivalent to ranking by probability.
 
-\textbf{Variable cost implications.}
-Each additional feature must increase the expected customer profit by at least 200 EUR to be
-worth including. For a model yielding 78\% precision on 1\,000 targets, the variable budget
-is roughly $\lfloor (780\cdot10 - 220\cdot5)/200 \rfloor = 27$ features at most before the
-data cost exceeds the revenue. In practice, weaker variables should be excluded far earlier,
-since the precision estimate itself degrades as irrelevant features are added.
+\textbf{Cost-Benefit Analysis of Feature Selection}
+
+Our cost-benefit analysis demonstrates that the high penalty of 200 EUR per variable significantly impacts the optimal model complexity. For any new feature to be economically viable, it must independently generate at least 20 additional True Positives without increasing the False Positive rate (20 TP $\times$ 10 EUR = 200 EUR). 
+
+During our experiments, we observed that due to the high noise level in the dataset, adding further variables failed to offset their acquisition costs. Consequently, the most profitable strategy dictates an extreme dimensionality reduction, justifying our decision to rely on a highly restricted feature set to maximize the net campaign revenue.
 
 \section{Data and Exploratory Analysis}
 
@@ -121,7 +120,7 @@ intensive wrapper stage (Figure~\ref{fig:pipeline}).
 \draw[arr] (s1) -- (s2);
 \draw[arr] (s2) -- (s3);
 \draw[arr] (s3) -- (out);
-\node[below=0.12cm of s0, font=\scriptsize, color=gray] {500 $\to$ $\sim$400};
+\node[below=0.12cm of s0, font=\scriptsize, color=gray] {500 $\to$ $\sim$490};
 \node[below=0.12cm of s1, font=\scriptsize, color=gray] {$\to$ 50};
 \node[below=0.12cm of s2, font=\scriptsize, color=gray] {$\to$ 15};
 \node[below=0.12cm of s3, font=\scriptsize, color=gray] {$\to$ optimal};
@@ -135,7 +134,7 @@ threshold $|\rho|>0.85$, handling the multicollinearity identified in Section~2 
 fitting any predictive model.
 
 \textbf{Stage~1} trains a shallow Random Forest (100 trees) and retains the top-$n$ features
-by mean decrease in impurity, reducing dimensionality from ${\sim}400$ to~50.
+by mean decrease in impurity, reducing dimensionality from ${\sim}490$ to~50.
 
 \textbf{Stage~2} fits a deeper Random Forest (300 trees, \texttt{max\_features=log2}) on the
 Stage~1 survivors and selects the top-$m$ features. The higher tree depth provides a more
@@ -190,8 +189,6 @@ The strategy with higher CV profit is retained.
 Table~\ref{tab:baselines} records the validation-set profit of several canonical approaches,
 each evaluated on a fixed split (4\,000 training / 1\,000 validation samples). Increasing
 classification accuracy does not translate into higher profit when variable costs are large.
-The HGB model on Boruta features achieves 68.0\% validation accuracy, far above the 53.8\%
-of the single-feature baseline, yet yields a lower financial score by nearly 5\,000 EUR.
 
 \begin{table}[H]
 \centering
@@ -201,11 +198,11 @@ of the single-feature baseline, yet yields a lower financial score by nearly 5\,
 \toprule
 Approach & $K$ & Data cost & Val.\ acc. & Profit (EUR) \\
 \midrule
-LR --- single best feature (V390) & 1  & 200 & 0.538 & 2\,280 \\
-LR --- top-5 correlated features  & 5  & 1\,000 & 0.578 & 1\,490 \\
-LR --- Boruta confirmed features  & 26 & 5\,200 & 0.605 & $-$2\,730 \\
-HGB --- Boruta confirmed features & 26 & 5\,200 & 0.680 & $-$2\,730 \\
-LR --- L1 regularisation ($C=0.01$) & 56 & 11\,200 & 0.565 & $-$8\,750 \\
+LR --- single best feature (V390) & 1  & 200 & 0.533 & 2\,295 \\
+LR --- top-5 correlated features  & 5  & 1\,000 & 0.575 & 1\,490 \\
+HGB --- Boruta confirmed features & 28 & 5\,600 & 0.646 & $-$3\,120 \\
+LR --- Boruta confirmed features  & 28 & 5\,600 & 0.578 & $-$3\,160 \\
+LR --- L1 regularisation ($C=0.01$) & 52 & 10\,400 & 0.561 & $-$7\,955 \\
 \midrule
 \textbf{Proposed pipeline} & \textbf{4} & \textbf{800} & \textbf{---} & \textbf{5\,165 (CV)} \\
 \bottomrule
@@ -213,21 +210,21 @@ LR --- L1 regularisation ($C=0.01$) & 56 & 11\,200 & 0.565 & $-$8\,750 \\
 \end{table}
 
 \noindent The Boruta results are particularly instructive: even a state-of-the-art feature
-selector designed for Random Forests produces a negative profit because the 5\,200 EUR data
-cost eclipses any benefit from selecting 26 genuinely predictive variables. This confirms that
+selector designed for Random Forests produces a negative profit because the 5\,600 EUR data
+cost eclipses any benefit from selecting 28 genuinely predictive variables. This confirms that
 variable cost must be embedded directly into the selection criterion rather than treated as an
 afterthought.
 
 \subsection{Free Feature Engineering}
 
-Having paid for $K = 6$ original variables, we can generate derived features at no additional
-cost. We constructed: $\binom{6}{2} = 15$ pairwise products, $6 \times 5 = 30$ directed
-ratios, 6 signed-log transforms $\mathrm{sign}(x)\log(1+|x|)$, 5 row statistics (min, max,
+Having paid for $K = 4$ original variables, we can generate derived features at no additional
+cost. We constructed: $\binom{4}{2} = 6$ pairwise products, $4 \times 3 = 12$ directed
+ratios, 4 signed-log transforms $\mathrm{sign}(x)\log(1+|x|)$, 5 row statistics (min, max,
 mean, std, range), 2 PCA components, and 5 K-means features (distances to 4 centroids and
-cluster label) --- 63 derived features in total. Models trained on the full 69-dimensional
-space were compared against the baseline 6-feature model via CV profit. No architecture
-(cautious HGB, expressive HGB, RF, LR) improved over the 6-feature baseline, and the same
-six original variables were re-selected in follow-up runs. This indicates that the original
+cluster label) --- 34 derived features in total. Models trained on the full 38-dimensional
+space were compared against the baseline 4-feature model via CV profit. No architecture
+(cautious HGB, expressive HGB, RF, LR) improved over the 4-feature baseline, and the same
+four original variables were re-selected in follow-up runs. This indicates that the original
 features capture the available discriminative signal and that the derived representations
 introduce noise rather than information.
 
