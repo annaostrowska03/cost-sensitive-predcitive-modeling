@@ -24,16 +24,16 @@ Score = (TP × 10) − (FP × 5) − (num_variables × 200)
 
 | | |
 |---|---|
-| **Selected features** | V160, V191, V215 (3 variables — stability-selected) |
-| **Unbiased CV profit** (nested CV, 3 folds) | **2 510 ± 636 EUR** |
-| **OOF CV profit** (HGB on stable features) | 5 125 EUR *(biased — do not report)* |
+| **Selected features** | V215, V191, V160, V32, V380 (5 variables — stability-selected) |
+| **Unbiased CV profit** (nested CV, 5 folds) | **315 ± 1 162 EUR** |
+| **OOF CV profit** (HGB on stable features) | 5 085 EUR *(biased — do not report)* |
 | **Strategy** | HGB-only (ensemble did not improve) |
 | **Decision threshold** | 0.170 |
 | **Submission** | 1 000 customers |
 
 The unbiased estimate comes from nested CV where feature selection (all 4 stages)
-runs independently inside each outer fold.  Features that appeared in ≥ 2/3 folds
-(V160, V191, V215) are used for the final model.  See `docs/nested_cv_summary.png`.
+runs independently inside each outer fold.  Features that appeared in ≥ 3/5 folds
+are used for the final model.  See `docs/nested_cv_summary.png`.
 
 ## Methodology
 
@@ -55,20 +55,20 @@ SFS uses **ranking mode** (threshold = −∞): instead of optimising a decision
 Stages 1–2 are supervised (they see training labels), which would normally cause leakage if CV was run afterwards on the same data.  The pipeline addresses this with **nested cross-validation**:
 
 ```
-Outer fold 1  ┌─ train (3333 obs) ─ run full 4-stage selection ─ fit model ─┐
-              └─ val  (1667 obs)  ─────────────────────────────── evaluate  ─┘
-Outer fold 2  ┌─ train (3333 obs) ─ run full 4-stage selection ─ fit model ─┐
-              └─ val  (1667 obs)  ─────────────────────────────── evaluate  ─┘
-Outer fold 3  (same)
+Outer fold 1  ┌─ train (4000 obs) ─ run full 4-stage selection ─ fit model ─┐
+              └─ val  (1000 obs)  ─────────────────────────────── evaluate  ─┘
+Outer fold 2  ┌─ train (4000 obs) ─ run full 4-stage selection ─ fit model ─┐
+              └─ val  (1000 obs)  ─────────────────────────────── evaluate  ─┘
+Outer folds 3–5  (same)
 ```
 
 Stages 1–2 never see the validation fold labels → the reported profit is **unbiased**.
 
 ### How the final feature set is chosen (stability selection)
 
-Each outer fold independently selects a different feature subset.  Only features that appear in **≥ 2 out of 3 folds** are kept for the final model.  This discards features that looked useful on one particular data split but are likely noise.
+Each outer fold independently selects a different feature subset.  Only features that appear in **≥ 3 out of 5 folds** (majority) are kept for the final model.  This discards features that looked useful on one particular data split but are likely noise.
 
-Current stable features: **V160, V191, V215**
+Current stable features: **V215, V191, V160, V32, V380**
 
 ### How the model and threshold are chosen
 
@@ -82,10 +82,10 @@ Current stable features: **V160, V191, V215**
 
 | Estimate | Value | Meaning |
 |----------|-------|---------|
-| Nested CV (unbiased) | **2 510 ± 636 EUR** | Expected profit on truly unseen data |
-| OOF CV on stable features | 5 125 EUR | Biased — do not report as expected performance |
+| Nested CV — 5 folds (unbiased) | **315 ± 1 162 EUR** | Expected profit on truly unseen data |
+| OOF CV on stable features | 5 085 EUR | Biased — do not report as expected performance |
 
-The gap between the two numbers reflects leakage from feature pre-filtering (Stages 1–2) on the full dataset.  The nested CV estimate is the correct figure to report.
+The gap reflects leakage from Stages 1–2 being supervised on the full dataset.  The nested CV estimate is the correct figure to report.  The wide interval (±1 162 EUR) indicates high variance across folds — two of the five folds produced negative profit, driven by folds where feature selection chose a costly set (6 features × 200 EUR = 1 200 EUR fixed cost).
 
 ---
 
@@ -199,6 +199,7 @@ uv run python -m src.experiments.run_optimization_ensemble
 | `CSM_THRESHOLD_MARGIN` | `0.02` | Conservative threshold shift to reduce FP on test |
 | `CSM_SFS_REPEATS` | `3` / `1` | Repeated-CV runs in SFS wrapper |
 | `CSM_SFS_FOLDS` | `5` | CV folds inside SFS wrapper |
+| `CSM_NESTED_CV_FOLDS` | `3` | Outer folds in nested CV (more = less bias, slower) |
 | `CSM_FILTER_RF_N` | `100` | Trees in Stage-1 RF filter |
 | `CSM_EMBEDDED_RF_N` | `300` | Trees in Stage-2 embedded RF |
 

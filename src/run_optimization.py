@@ -370,8 +370,12 @@ def main() -> None:
     y = y_train.iloc[:, 0]
 
     # Step 1+2: nested CV → unbiased profit estimate + stable feature set.
-    logger.info("Step 1/4 — nested CV feature selection (3 folds, ~3x runtime)…")
-    unbiased_profit, features = nested_cv_profit_estimate(X_train, y, n_outer_folds=3)
+    n_folds = cfg.nested_cv_folds
+    logger.info("Step 1/4 — nested CV feature selection (%d folds, ~%dx runtime)…", n_folds, n_folds)
+    min_appearances = max(2, (n_folds + 1) // 2)  # majority for odd, half+1 for even
+    unbiased_profit, features = nested_cv_profit_estimate(
+        X_train, y, n_outer_folds=n_folds, min_fold_appearances=min_appearances,
+    )
 
     if not features:
         logger.warning("No stable features found. Exiting.")

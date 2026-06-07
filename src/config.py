@@ -81,6 +81,9 @@ class Config:
     sfs_n_repeats: int | None = field(default=None)
     sfs_cv_folds: int = field(default_factory=lambda: _int("CSM_SFS_FOLDS", 5))
 
+    # Nested CV outer folds (more = less bias, slower)
+    nested_cv_folds: int = field(default_factory=lambda: _int("CSM_NESTED_CV_FOLDS", 3))
+
     # RF trees in feature selection stages
     filter_n_estimators: int = field(default_factory=lambda: _int("CSM_FILTER_RF_N", 100))
     embedded_n_estimators: int = field(default_factory=lambda: _int("CSM_EMBEDDED_RF_N", 300))
