@@ -24,9 +24,9 @@ Score = (TP × 10) − (FP × 5) − (num_variables × 200)
 
 | | |
 |---|---|
-| **Selected features** | V215, V191, V160, V32, V380 (5 variables — stability-selected) |
+| **Selected features** | V160, V191, V215, V32 (4 variables) |
 | **Unbiased CV profit** (nested CV, 5 folds) | **315 ± 1 162 EUR** |
-| **OOF CV profit** (HGB on stable features) | 5 085 EUR *(biased — do not report)* |
+| **OOF CV profit** (HGB on stable features + combo search) | **5 165 EUR** *(biased — do not report as expected profit)* |
 | **Strategy** | HGB-only (ensemble did not improve) |
 | **Decision threshold** | 0.170 |
 | **Submission** | 1 000 customers |

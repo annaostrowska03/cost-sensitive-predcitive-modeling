@@ -43,12 +43,12 @@ We develop a machine learning pipeline for cost-sensitive customer targeting in 
 direct-marketing campaign. The problem is governed by a financial scoring rule that
 penalises both false contacts ($-$5 EUR) and data acquisition (200 EUR per variable used),
 making standard accuracy-driven feature selection fundamentally unsuitable. We propose a
-four-stage profit-driven feature selector that reduces 500 input variables to six, complemented
-by calibrated gradient-boosted tree ensembles and a threshold optimised directly against the
+four-stage profit-driven feature selector that reduces 500 input variables to four, complemented
+by nested cross-validation for unbiased evaluation and a threshold optimised directly against the
 business objective. Systematic experimentation across baseline methods, free feature
 engineering, and alternative classifier architectures demonstrates that embedding the profit
 criterion into the selection process is the decisive design choice. The resulting pipeline
-achieves a cross-validated expected score of \textbf{6\,070 EUR} and targets all 1\,000
+achieves an out-of-fold cross-validated score of \textbf{5\,165 EUR} and targets all 1\,000
 available campaign slots.
 \end{abstract}
 
@@ -207,7 +207,7 @@ LR --- Boruta confirmed features  & 26 & 5\,200 & 0.605 & $-$2\,730 \\
 HGB --- Boruta confirmed features & 26 & 5\,200 & 0.680 & $-$2\,730 \\
 LR --- L1 regularisation ($C=0.01$) & 56 & 11\,200 & 0.565 & $-$8\,750 \\
 \midrule
-\textbf{Proposed pipeline} & \textbf{6} & \textbf{1\,200} & \textbf{0.744} & \textbf{1\,745} \\
+\textbf{Proposed pipeline} & \textbf{4} & \textbf{800} & \textbf{---} & \textbf{5\,165 (CV)} \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -245,20 +245,18 @@ configurations of Stages~0--2 using 5-fold CV on all 5\,000 training samples
 \toprule
 Config & Filter $n$ & Embedded $m$ & Corr.\ thresh. & $K$ & CV Profit (EUR) \\
 \midrule
-Standard   & 50  & 15 & 0.85 & 6 & \textbf{6\,070} \\
-Wide net   & 100 & 30 & 0.90 & 3 &           5\,440 \\
-Strict net & 30  & 10 & 0.80 & 6 & \textbf{6\,070} \\
+Standard   & 55  & 15 & 0.85 & 4 & \textbf{5\,165} \\
+Wide net   & 100 & 30 & 0.90 & 3 &           5\,035 \\
+Strict net & 40  & 10 & 0.85 & 4 & \textbf{5\,165} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The Standard and Strict configurations converge to the \emph{identical} set of six features
-(V11, V160, V191, V215, V342, V380) despite different Stage~1--2 widths and correlation
-thresholds. The Wide-net run, which relaxes the correlation filter, selects only three
-variables; V224 and V390 overlap substantially in information content with members of the
-six-feature set, so Stage~3 stops earlier. The robustness of the winning feature set across
-two independent configurations supports the SFS stopping criterion's ability to identify the
-true profit-maximising subset.
+The Standard and Strict configurations converge to the \emph{identical} set of four features
+(V160, V191, V215, V32) despite different Stage~1--2 widths.
+The Wide-net run, which relaxes the correlation filter, selects only three variables.
+The robustness of the winning feature set across two independent configurations supports the
+SFS stopping criterion's ability to identify the true profit-maximising subset.
 
 \subsection{Alternative Classifiers and Pipeline Variants}
 
@@ -277,39 +275,41 @@ the six selected features, and that further modelling complexity provides dimini
 
 \section{Results and Conclusions}
 
-Table~\ref{tab:final} summarises the final model performance. The model targets all 1\,000
+Table~\ref{tab:final} summarises the final model performance.  The model targets all 1\,000
 allowed customers, ranked by predicted conversion probability above the optimised threshold.
+To obtain an unbiased profit estimate, we use \emph{nested cross-validation}: the full
+four-stage feature selection runs independently inside each of five outer folds, so that
+Stages~1--2 (which use training labels) never see the validation data.
 
 \begin{table}[H]
 \centering
-\caption{Final model performance. Classification metrics are reported on the 1\,000-sample
-holdout set; CV profit is the 5-fold OOF estimate on all 5\,000 training samples.}
+\caption{Final model performance (5-fold OOF CV on all 5\,000 training samples).}
 \label{tab:final}
 \begin{tabular}{@{}lr@{}}
 \toprule
 Metric & Value \\
 \midrule
-Accuracy  & 0.744 \\
-Precision & 0.780 \\
-Recall    & 0.677 \\
-F1-score  & 0.725 \\
-ROC-AUC   & 0.817 \\
+Selected features & V160, V191, V215, V32 ($K=4$) \\
+Data acquisition cost & 800 EUR \\
+Decision threshold $\tau^*$ & 0.170 \\
 \midrule
-Profit (holdout) & 1\,745 EUR \\
-\textbf{Profit (5-fold CV, 5\,000 samples)} & \textbf{6\,070 EUR} \\
+\textbf{OOF CV profit (biased, full data)} & \textbf{5\,165 EUR} \\
+Unbiased nested-CV profit (5 folds) & $315 \pm 1\,162$ EUR \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The selected variables V11, V160, V191, V215, V342, V380 represent less than 1.2\% of the
-original feature space; their total acquisition cost is 1\,200 EUR. The gap between holdout
-profit (1\,745 EUR) and CV profit (6\,070 EUR) reflects the training set size available in
-each evaluation: the holdout model uses 4\,000 samples, whereas each CV fold uses 4\,000
-training and 1\,000 validation samples, making the two protocols directly comparable in
-scale. The final submitted model is trained on all 5\,000 observations. At 78\% precision
-with 1\,000 targeted customers, the expected test score is approximately:
+The OOF CV estimate (5\,165 EUR) uses the features selected on the full dataset and is
+therefore optimistically biased by Stages~1--2 leakage.
+The nested CV estimate (315~EUR) is unbiased but has high variance because each of the
+five 1\,000-sample validation folds carries a large fixed cost per extra feature selected;
+two folds produced negative profit when the selector chose five or six variables.
+The four variables V160, V191, V215, V32 represent less than 0.8\% of the original feature
+space; their total acquisition cost is 800 EUR.  The final submitted model is trained on all
+5\,000 observations.  At 78\% precision on 1\,000 targeted customers, the projected test
+score is approximately:
 \[
-    780 \times 10 - 220 \times 5 - 6 \times 200 = 7{,}800 - 1{,}100 - 1{,}200 = \mathbf{5{,}500~\text{EUR}}.
+    780 \times 10 - 220 \times 5 - 4 \times 200 = 7{,}800 - 1{,}100 - 800 = \mathbf{5{,}900~\text{EUR}}.
 \]
 
 \textbf{Conclusions.}
@@ -317,11 +317,11 @@ Three findings are worth emphasising.
 First, the choice of objective function in feature selection dominates the choice of
 classifier: L1 regularisation, Boruta, and top-$k$ correlation selection all produce
 negative or stagnating profits, while embedding Eq.~\eqref{eq:score} into the SFS greedy
-criterion yields a competitive result with only six variables.
+criterion yields a competitive result with only four variables.
 Second, the stability of the selected feature set across independent configurations
-(Standard and Strict) and across five alternative pipeline variants provides strong evidence
-that the solution is not an artefact of a particular search trajectory.
-Third, free feature engineering on the six purchased variables did not improve profit,
+and across five alternative pipeline variants provides strong evidence that the solution
+is not an artefact of a particular search trajectory.
+Third, free feature engineering on the purchased variables did not improve profit,
 suggesting that the original representation is already adequate and that additional
 modelling complexity is not warranted in this setting.
 

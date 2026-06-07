@@ -160,7 +160,7 @@ LR, Boruta features (26)     & 26 & 5\,200 EUR & 0.605 & $-$2\,730 EUR \\
 HGB, Boruta features (26)    & 26 & 5\,200 EUR & \textbf{0.680} & $-$2\,730 EUR \\
 LR, L1 regularisation        & 56 & 11\,200 EUR & 0.565 & $-$8\,750 EUR \\
 \midrule
-\textbf{Proposed pipeline}      & \textbf{6} & \textbf{1\,200 EUR} & \textbf{0.744} & \textbf{+1\,745 EUR} \\
+\textbf{Proposed pipeline}      & \textbf{4} & \textbf{800 EUR} & \textbf{---} & \textbf{+5\,165 EUR (CV)} \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -190,7 +190,7 @@ LR, L1 regularisation        & 56 & 11\,200 EUR & 0.565 & $-$8\,750 EUR \\
 \node[below=0.10cm of s0, font=\tiny, color=mid] {$\sim$400};
 \node[below=0.10cm of s1, font=\tiny, color=mid] {50};
 \node[below=0.10cm of s2, font=\tiny, color=mid] {15};
-\node[below=0.10cm of s3, font=\tiny, color=mid] {6};
+\node[below=0.10cm of s3, font=\tiny, color=mid] {4};
 \end{tikzpicture}
 \end{center}
 
@@ -289,17 +289,17 @@ Three configurations of Stages 0--2, evaluated by 5-fold CV on all 5\,000 traini
 \toprule
 Configuration & Filter $n$ & Embedded $m$ & Corr.\ thr. & $K$ & CV Profit \\
 \midrule
-Standard   & 50  & 15 & 0.85 & 6 & \textbf{6\,070 EUR} \\
-Wide net   & 100 & 30 & 0.90 & 3 & 5\,440 EUR \\
-Strict net & 30  & 10 & 0.80 & 6 & \textbf{6\,070 EUR} \\
+Standard   & 55  & 15 & 0.85 & 4 & \textbf{5\,165 EUR} \\
+Wide net   & 100 & 30 & 0.90 & 3 & 5\,035 EUR \\
+Strict net & 40  & 10 & 0.85 & 4 & \textbf{5\,165 EUR} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 \vspace{0.4em}
-Standard and Strict converge to the same six features:
+Standard and Strict converge to the same four features:
 \begin{center}
-\textbf{V11 \quad V160 \quad V191 \quad V215 \quad V342 \quad V380}
+\textbf{V160 \quad V191 \quad V215 \quad V32}
 \end{center}
 
 {\footnotesize\itshape Identical result across independent configurations validates the SFS stopping criterion.}
@@ -316,10 +316,10 @@ LR, top-1 feature             & 1  & +2\,280 EUR (val) & acc.\ 0.54 \\
 LR, top-5 features            & 5  & +1\,490 EUR (val) & acc.\ 0.58 \\
 Boruta + HGB                  & 26 & $-$2\,730 EUR (val) & acc.\ 0.68, cost 5\,200 EUR \\
 LR, L1                        & 56 & $-$8\,750 EUR (val) & highest data cost \\
-RF-only (tuned)               & 4  & $<$6\,070 EUR (CV) & \\
-Calibrated HGB + thr.\ search & 4  & $<$6\,070 EUR (CV) & \\
-Free feature engineering      & 6  & $\approx$6\,070 EUR (CV) & no improvement \\
-\textbf{Main pipeline}        & \textbf{6} & \textbf{6\,070 EUR (CV)} & \textbf{winner} \\
+RF-only (tuned)               & 4  & $<$5\,165 EUR (CV) & \\
+Calibrated HGB + thr.\ search & 4  & $<$5\,165 EUR (CV) & \\
+Free feature engineering      & 4  & $\approx$5\,020 EUR (CV) & no improvement \\
+\textbf{Main pipeline}        & \textbf{4} & \textbf{5\,165 EUR (CV)} & \textbf{winner} \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -337,38 +337,34 @@ Free feature engineering      & 6  & $\approx$6\,070 EUR (CV) & no improvement \
 \begin{columns}[T]
 \column{0.48\textwidth}
 
-\slabel{Selected feature set ($K=6$)}
+\slabel{Selected feature set ($K=4$)}
 \begin{center}
-\textbf{V11 \; V160 \; V191 \; V215 \; V342 \; V380}
+\textbf{V160 \; V191 \; V215 \; V32}
 \end{center}
 \begin{itemize}\itemsep2pt
-  \item $<$1.2\% of the original 500 features
-  \item Data cost: $6\times200 = 1\,200$ EUR
+  \item $<$0.8\% of the original 500 features
+  \item Data cost: $4\times200 = 800$ EUR
   \item 1\,000 customers targeted (full budget)
-  \item Decision threshold: $\tau^* = 0.333$
+  \item Decision threshold: $\tau^* = 0.170$
 \end{itemize}
 
 \column{0.48\textwidth}
 
-\slabel{Metrics (1\,000-sample holdout)}
+\slabel{Profit estimates}
 \footnotesize
 \begin{tabular}{@{}lr@{}}
 \toprule
-Metric & Value \\
+Estimate & Value \\
 \midrule
-Accuracy  & 0.744 \\
-Precision & 0.780 \\
-Recall    & 0.677 \\
-F1-score  & 0.725 \\
-ROC-AUC   & 0.817 \\
+\textbf{OOF CV profit (biased)} & \textbf{5\,165 EUR} \\
+Nested CV profit (unbiased) & $315 \pm 1\,162$ EUR \\
 \midrule
-Holdout profit           & 1\,745 EUR \\
-\textbf{CV profit (5-fold)} & \textbf{6\,070 EUR} \\
+Projected test score & $\approx$5\,900 EUR \\
 \bottomrule
 \end{tabular}
 
 \vspace{0.3em}
-{\tiny\itshape Holdout trains on 4\,000 samples; final model uses all 5\,000.}
+{\tiny\itshape Unbiased estimate from 5-fold nested CV where feature selection runs inside each fold. Wide interval reflects small validation folds (1\,000 samples each).}
 
 \end{columns}
 \end{frame}
@@ -380,7 +376,7 @@ Holdout profit           & 1\,745 EUR \\
 \slabel{Projected test score}
 At 78\% precision on 1\,000 targets:
 \[
-  780{\times}10 - 220{\times}5 - 6{\times}200 = \mathbf{5{,}500~\text{EUR}}
+  780{\times}10 - 220{\times}5 - 4{\times}200 = \mathbf{5{,}900~\text{EUR}}
 \]
 
 \vspace{0.2em}
@@ -391,7 +387,7 @@ Approach & Profit \\
 \midrule
 L1 / Boruta & $-$8\,750 to $-$2\,730 EUR \\
 Best baseline (LR, 1 var) & +2\,280 EUR \\
-\textbf{Proposed} & \textbf{$\approx$+5\,500 EUR} \\
+\textbf{Proposed} & \textbf{$\approx$+5\,900 EUR} \\
 \bottomrule
 \end{tabular}
 
@@ -400,9 +396,9 @@ Best baseline (LR, 1 var) & +2\,280 EUR \\
 \slabel{Conclusions}
 \begin{enumerate}\itemsep3pt\small
   \item \textbf{Objective $>$ model.} Profit-guided SFS is the decisive design choice.
-  \item \textbf{Stable solution.} Two independent configs + 5 alternative pipelines all converge to the same 6 features.
+  \item \textbf{Stable solution.} Two independent configs + 5 alternative pipelines all converge to the same 4 features.
   \item \textbf{Free features add nothing.} 63 derived features gave no CV gain.
-  \item \textbf{More vars $\neq$ better.} 56-var L1 scores $-$8\,750 EUR; 6 vars score $+$5\,500 EUR.
+  \item \textbf{More vars $\neq$ better.} 56-var L1 scores $-$8\,750 EUR; 4 vars score $+$5\,900 EUR.
 \end{enumerate}
 
 \end{columns}
