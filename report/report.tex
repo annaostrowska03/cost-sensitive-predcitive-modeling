@@ -84,7 +84,7 @@ continuous features (V1--V500) and a binary target (accepted / declined). The ta
 balanced (49.76\% positives), so class-imbalance resampling is not required.
 
 \textbf{Feature-target correlation.}
-Individual Spearman correlations with the label are uniformly weak: the strongest single
+Individual Pearson correlations with the label are uniformly weak: the strongest single
 predictor, V390, achieves $\rho = 0.114$. A purely linear, single-feature strategy is limited
 by this ceiling; a logistic regression on V390 alone achieves 53.8\% validation accuracy. No
 single variable provides sufficient signal in isolation.
@@ -202,7 +202,7 @@ classification accuracy does not translate into higher profit when variable cost
 Approach & $K$ & Data cost & Val.\ acc. & Profit (EUR) \\
 \midrule
 LR --- single best feature (V390) & 1  & 200 & 0.533 & 2\,295 \\
-LR --- top-5 correlated features  & 5  & 1\,000 & 0.575 & 1\,490 \\
+LR --- top-5 correlated features  & 5  & 1\,000 & 0.557 & 1\,490 \\
 HGB --- Boruta confirmed features & 28 & 5\,600 & 0.646 & $-$3\,120 \\
 LR --- Boruta confirmed features  & 28 & 5\,600 & 0.578 & $-$3\,160 \\
 LR --- L1 regularisation ($C=0.01$) & 52 & 10\,400 & 0.561 & $-$7\,955 \\
