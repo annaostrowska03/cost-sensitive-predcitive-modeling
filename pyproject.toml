@@ -1,0 +1,53 @@
+[project]
+name = "cost-sensitive-predictive-modeling"
+version = "0.1.0"
+description = "Cost-sensitive predictive modeling for targeted marketing campaigns"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.0,<3.0",
+    "pandas>=2.0,<3.0",
+    "scikit-learn>=1.6,<2.0",
+    "matplotlib>=3.7,<4.0",
+    "seaborn>=0.13,<1.0",
+    "boruta>=0.4.3",
+    "matplotlib-inline>=0.2.2",
+    "ipython>=9.14.1",
+    "ipykernel>=7.2.0",
+]
+
+[project.optional-dependencies]
+notebooks = [
+    "jupyter>=1.0",
+    "ipykernel>=6.0",
+]
+lgbm = [
+    "lightgbm>=4.0",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "pandas-stubs>=2.0",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "pandas-stubs>=2.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "N", "B", "A"]
+# N803/N806: ML convention uses uppercase X for feature matrices (matches scikit-learn API).
+# N802: same reason — function args like X, C are standard ML names.
+ignore = ["E501", "N803", "N806", "N802"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true

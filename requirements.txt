@@ -1,5 +1,6 @@
-pandas
-numpy
-matplotlib
-seaborn
-scikit-learn
+# Fallback for pip users. Preferred setup: uv sync (see README)
+numpy>=2.0
+pandas>=2.0
+scikit-learn>=1.6
+matplotlib>=3.7
+seaborn>=0.13

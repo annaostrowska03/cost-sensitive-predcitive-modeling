@@ -1,4 +1,29 @@
 data/
 .history
-pycache/
+__pycache__/
+.venv/
+.venv*/
 *.pyc
+*.pyo
+
+# generated pipeline output files (not the final submission)
+ids_*_obs.txt
+ids_*_vars.txt
+TODO_STUDENCI_IDS_*.txt
+test_run_*.txt
+
+# experiment log
+experiments.log
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.nav
+*.snm
+*.vrb
+wyklady/
