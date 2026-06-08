@@ -306,10 +306,10 @@ five 1\,000-sample validation folds carries a large fixed cost per extra feature
 two folds produced negative profit when the selector chose five or six variables.
 The four variables V160, V191, V215, V32 represent less than 0.8\% of the original feature
 space; their total acquisition cost is 800 EUR.  The final submitted model is trained on all
-5\,000 observations.  At 78\% precision on 1\,000 targeted customers, the projected test
-score is approximately:
+5\,000 observations.  The OOF CV estimate implies approximately 73\% precision on
+1\,000 targeted customers (731 TP, 269 FP), consistent with the reported profit:
 \[
-    780 \times 10 - 220 \times 5 - 4 \times 200 = 7{,}800 - 1{,}100 - 800 = \mathbf{5{,}900~\text{EUR}}.
+    731 \times 10 - 269 \times 5 - 4 \times 200 = 7{,}310 - 1{,}345 - 800 = \mathbf{5{,}165~\text{EUR}}.
 \]
 
 \textbf{Conclusions.}
