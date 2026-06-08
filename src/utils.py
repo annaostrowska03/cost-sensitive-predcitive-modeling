@@ -1,12 +1,9 @@
-"""Shared helpers used across all pipeline scripts.
-
-Each function here existed as a verbatim duplicate in multiple run_*.py files.
-Centralising them here enforces a single source of truth.
-"""
+"""Shared utility functions used across all pipeline scripts."""
 from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 
 import numpy as np
 import numpy.typing as npt
@@ -17,9 +14,7 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-
 logger = logging.getLogger(__name__)
-
 
 
 def load_project_data(
@@ -40,7 +35,7 @@ def load_project_data(
     y_train = _read("y_train.txt")
     X_test = _read("x_test.txt")
     logger.info(
-        "Data loaded — X_train: %s, y_train: %s, X_test: %s",
+        "Data loaded - X_train: %s, y_train: %s, X_test: %s",
         X_train.shape, y_train.shape, X_test.shape,
     )
     return X_train, y_train, X_test
@@ -121,8 +116,6 @@ def calculate_profit(
     return float(total)
 
 
-
-
 def cv_splits(y: pd.Series, upper_bound: int = 5) -> int:
     """Return a valid number of stratified CV folds for target vector *y*."""
     n = min(upper_bound, int(y.value_counts().min()))
@@ -132,7 +125,7 @@ def cv_splits(y: pd.Series, upper_bound: int = 5) -> int:
 
 
 def oof_predict_proba(
-    model_factory: callable,
+    model_factory: Callable[[], object],
     X: pd.DataFrame,
     y: pd.Series,
     random_state: int = 42,

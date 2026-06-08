@@ -6,6 +6,7 @@ from collections import Counter
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import Patch
 
 logger = logging.getLogger(__name__)
 
@@ -61,16 +62,18 @@ def plot_nested_cv_summary(
     fold_features: list[list[str]],
     stable_features: list[str],
     output_path: str = "docs/nested_cv_summary.png",
+    stability_threshold: int | None = None,
 ) -> None:
     """Two-panel summary of nested CV results.
 
-    Left panel — unbiased profit per outer fold (bar chart) with mean ± std.
-    Right panel — feature stability: how many folds each feature appeared in.
+    Left panel: unbiased profit per outer fold (bar chart) with mean +/- std.
+    Right panel: feature stability (how many folds each feature appeared in).
     Stable features (used in final model) are highlighted in dark blue.
     """
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     n_folds = len(fold_profits)
+    threshold = stability_threshold if stability_threshold is not None else max(2, (n_folds + 1) // 2)
     mean_p = float(np.mean(fold_profits))
     std_p = float(np.std(fold_profits))
 
@@ -99,7 +102,7 @@ def plot_nested_cv_summary(
         )
     ax_left.set_title("Unbiased Profit per Outer Fold", fontsize=12)
     ax_left.set_ylabel("Profit (EUR)", fontsize=11)
-    ax_left.set_ylim(0, max(fold_profits) * 1.25)
+    ax_left.set_ylim(min(0, min(fold_profits)) * 1.15, max(0, max(fold_profits)) * 1.25)
     ax_left.legend(fontsize=10)
     ax_left.grid(axis="y", linestyle="--", alpha=0.5)
 
@@ -107,8 +110,8 @@ def plot_nested_cv_summary(
     feat_counts = [counts[f] for f in all_features]
     bar_colors = ["#1f4e79" if f in stable_features else "#aec7e8" for f in all_features]
     ax_right.barh(all_features, feat_counts, color=bar_colors, edgecolor="black", linewidth=0.8)
-    ax_right.axvline(2, color="red", linestyle="--", linewidth=1.5,
-                     label=f"Stability threshold (≥2/{n_folds} folds)")
+    ax_right.axvline(threshold, color="red", linestyle="--", linewidth=1.5,
+                     label=f"Stability threshold (≥{threshold}/{n_folds} folds)")
     ax_right.set_title("Feature Stability Across Folds", fontsize=12)
     ax_right.set_xlabel("Number of folds feature was selected", fontsize=11)
     ax_right.set_xlim(0, n_folds + 0.5)
@@ -116,8 +119,6 @@ def plot_nested_cv_summary(
     ax_right.legend(fontsize=10)
     ax_right.grid(axis="x", linestyle="--", alpha=0.5)
 
-    # Legend patch for stable vs unstable
-    from matplotlib.patches import Patch
     legend_elements = [
         Patch(facecolor="#1f4e79", edgecolor="black", label="Stable (used in model)"),
         Patch(facecolor="#aec7e8", edgecolor="black", label="Unstable (discarded)"),
@@ -125,7 +126,7 @@ def plot_nested_cv_summary(
     ax_right.legend(handles=legend_elements, fontsize=10, loc="lower right")
 
     fig.suptitle(
-        f"Nested CV Results — Unbiased profit: {mean_p:,.0f} ± {std_p:,.0f} EUR",
+        f"Nested CV Results - Unbiased profit: {mean_p:,.0f} +/- {std_p:,.0f} EUR",
         fontsize=13, fontweight="bold", y=1.02,
     )
     fig.tight_layout()

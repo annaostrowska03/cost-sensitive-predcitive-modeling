@@ -1,4 +1,4 @@
-"""Runtime configuration — all environment-variable reading lives here.
+"""Runtime configuration. All environment-variable reading lives here.
 
 Every pipeline script instantiates ``Config()`` once and reads attributes
 instead of calling ``os.getenv`` directly.  This keeps env-var names and
@@ -15,13 +15,14 @@ CSM_PARAM_SEARCH_ITER    24 (8 fast)        HGB random-search iterations
 CSM_THRESHOLD_MIN        0.15               lower bound of threshold grid
 CSM_THRESHOLD_MAX        0.50               upper bound of threshold grid
 CSM_THRESHOLD_GRID_SIZE  36 (17 fast)       number of threshold grid points
-CSM_THRESHOLD_MARGIN     0.0                shift CV-optimal threshold up to cut FP
+CSM_THRESHOLD_MARGIN     0.02               shift CV-optimal threshold up to cut FP
 CSM_RF_ESTIMATORS        400 (250 fast)     trees in the RF support model
 CSM_BLEND_STEP           0.05 (0.10 fast)   grid step for pair-blend search
 CSM_PCA_COMPONENTS       2                  PCA components in free engineering
 CSM_CLUSTER_COUNT        4                  K-means clusters in free engineering
 CSM_SFS_REPEATS          3 (1 fast)         repeated-CV runs in SFS wrapper
 CSM_SFS_FOLDS            5                  CV folds inside SFS wrapper
+CSM_NESTED_CV_FOLDS      5                  outer folds in nested CV
 """
 from __future__ import annotations
 
@@ -43,9 +44,14 @@ def _bool(name: str) -> bool:
     return os.getenv(name, "0") == "1"
 
 
-@dataclass
+@dataclass(frozen=True)
 class Config:
-    """Immutable-after-init configuration object."""
+    """Immutable runtime configuration object.
+
+    All fields are resolved from environment variables during construction
+    and cannot be modified afterwards (``frozen=True``).  Use
+    ``object.__setattr__`` inside ``__post_init__`` to set derived fields.
+    """
 
     team_name: str = field(default_factory=lambda: os.getenv("TEAM_NAME", "ids"))
     fast_mode: bool = field(default_factory=lambda: _bool("CSM_FAST_MODE"))
@@ -82,28 +88,30 @@ class Config:
     sfs_cv_folds: int = field(default_factory=lambda: _int("CSM_SFS_FOLDS", 5))
 
     # Nested CV outer folds (more = less bias, slower)
-    nested_cv_folds: int = field(default_factory=lambda: _int("CSM_NESTED_CV_FOLDS", 3))
+    nested_cv_folds: int = field(default_factory=lambda: _int("CSM_NESTED_CV_FOLDS", 5))
 
     # RF trees in feature selection stages
     filter_n_estimators: int = field(default_factory=lambda: _int("CSM_FILTER_RF_N", 100))
     embedded_n_estimators: int = field(default_factory=lambda: _int("CSM_EMBEDDED_RF_N", 300))
 
     def __post_init__(self) -> None:
+        # frozen=True prevents normal assignment; use object.__setattr__ for
+        # fields whose defaults depend on fast_mode (resolved at call time).
         fm = self.fast_mode
         if self.filter_top_n is None:
-            self.filter_top_n = _int("CSM_FILTER_TOP_N", 40 if fm else 55)
+            object.__setattr__(self, "filter_top_n", _int("CSM_FILTER_TOP_N", 40 if fm else 55))
         if self.embedded_target_n is None:
-            self.embedded_target_n = _int("CSM_EMBEDDED_TARGET_N", 10 if fm else 15)
+            object.__setattr__(self, "embedded_target_n", _int("CSM_EMBEDDED_TARGET_N", 10 if fm else 15))
         if self.param_search_iter is None:
-            self.param_search_iter = _int("CSM_PARAM_SEARCH_ITER", 8 if fm else 24)
+            object.__setattr__(self, "param_search_iter", _int("CSM_PARAM_SEARCH_ITER", 8 if fm else 24))
         if self.threshold_points is None:
-            self.threshold_points = _int("CSM_THRESHOLD_GRID_SIZE", 17 if fm else 36)
+            object.__setattr__(self, "threshold_points", _int("CSM_THRESHOLD_GRID_SIZE", 17 if fm else 36))
         if self.rf_estimators is None:
-            self.rf_estimators = _int("CSM_RF_ESTIMATORS", 250 if fm else 400)
+            object.__setattr__(self, "rf_estimators", _int("CSM_RF_ESTIMATORS", 250 if fm else 400))
         if self.blend_step is None:
-            self.blend_step = _float("CSM_BLEND_STEP", 0.10 if fm else 0.05)
+            object.__setattr__(self, "blend_step", _float("CSM_BLEND_STEP", 0.10 if fm else 0.05))
         if self.sfs_n_repeats is None:
-            self.sfs_n_repeats = _int("CSM_SFS_REPEATS", 1 if fm else 3)
+            object.__setattr__(self, "sfs_n_repeats", _int("CSM_SFS_REPEATS", 1 if fm else 3))
 
     @property
     def threshold_grid(self) -> np.ndarray:

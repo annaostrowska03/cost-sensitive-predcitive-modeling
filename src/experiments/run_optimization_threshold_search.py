@@ -1,23 +1,30 @@
+"""Calibrated HGB with threshold search experiment.
+
+Runs the 4-stage feature selection, then tunes HGB hyperparameters with
+optional Platt calibration and a fine-grained threshold grid search.
+"""
 from __future__ import annotations
 
 import logging
 import os
 
 import numpy as np
+import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.model_selection import ParameterSampler, StratifiedKFold
 
 from ..config import Config
-from ..data_loader import load_project_data
-from ..evaluation import select_offer_indices
 from ..feature_selection import ProfitDrivenFeatureSelector
-from ..utils import calibrate, cv_splits, find_best_threshold, write_submission
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+from ..run_optimization import HGB_PARAM_SPACE
+from ..utils import (
+    calibrate,
+    cv_splits,
+    find_best_threshold,
+    load_project_data,
+    select_offer_indices,
+    write_submission,
 )
+
 logger = logging.getLogger(__name__)
 
 cfg = Config()
@@ -25,18 +32,10 @@ cfg = Config()
 # Platt calibration adds computational cost; enable with CSM_TUNE_WITH_CALIBRATION=1.
 _TUNE_WITH_CALIBRATION = os.getenv("CSM_TUNE_WITH_CALIBRATION", "0") == "1"
 
-HGB_PARAM_SPACE = {
-    "learning_rate":     np.linspace(0.02, 0.20, 10),
-    "max_leaf_nodes":    [15, 31, 63, 127],
-    "min_samples_leaf":  [5, 10, 20, 40, 80],
-    "max_iter":          [120, 180, 240, 300],
-    "l2_regularization": [0.0, 0.1, 0.5, 1.0],
-}
-
 
 def _evaluate_hgb(
-    X: object,
-    y: object,
+    X: pd.DataFrame,
+    y: pd.Series,
     params: dict,
     num_vars: int,
 ) -> tuple[float, float]:
@@ -63,13 +62,17 @@ def _evaluate_hgb(
 
 def main() -> None:
     """Calibrated HGB pipeline: feature selection → param search → threshold search."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     logger.info(
         "threshold-search pipeline | fast=%s | param_iter=%d | thr_grid=%d | calibration=%s",
         cfg.fast_mode, cfg.param_search_iter, len(cfg.threshold_grid), _TUNE_WITH_CALIBRATION,
     )
 
-    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
-    X_train, y_train, X_test = load_project_data(data_dir=data_dir)
+    X_train, y_train, X_test = load_project_data()
     y = y_train.iloc[:, 0]
 
     selector = ProfitDrivenFeatureSelector(**cfg.selector_kwargs)
@@ -106,7 +109,7 @@ def main() -> None:
         final.predict_proba(X_te)[:, 1], threshold=best_threshold, max_offers=cfg.max_offers,
     )
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     write_submission(top_indices + 1, features, project_root, cfg.team_name, suffix="threshold")
 
 

@@ -1,16 +1,13 @@
 """Regenerate submission with the best feature combo: V160+V191+V215+V32."""
 from __future__ import annotations
 
-import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+import os
 
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 from src.config import Config
-from src.data_loader import load_project_data
-from src.evaluation import select_offer_indices
 from src.run_optimization import tune_hgb_for_profit
-from src.utils import write_submission
+from src.utils import load_project_data, select_offer_indices, write_submission
 
 cfg = Config()
 FEATURES = ["V160", "V191", "V215", "V32"]
@@ -18,6 +15,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 
 
 def main() -> None:
+    """Fit the best known combo and write submission files."""
     X_train, y_train, X_test = load_project_data()
     y = y_train.iloc[:, 0]
 

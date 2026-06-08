@@ -1,3 +1,8 @@
+"""Random Forest-only pipeline experiment.
+
+Runs the 4-stage feature selection, then tunes Random Forest
+hyperparameters via randomised search scored by OOF CV profit.
+"""
 from __future__ import annotations
 
 import logging
@@ -8,16 +13,15 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import ParameterSampler
 
 from ..config import Config
-from ..data_loader import load_project_data
-from ..evaluation import select_offer_indices
 from ..feature_selection import ProfitDrivenFeatureSelector
-from ..utils import find_best_threshold, oof_predict_proba, write_submission
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+from ..utils import (
+    find_best_threshold,
+    load_project_data,
+    oof_predict_proba,
+    select_offer_indices,
+    write_submission,
 )
+
 logger = logging.getLogger(__name__)
 
 cfg = Config()
@@ -34,13 +38,17 @@ RF_PARAM_SPACE = {
 
 def main() -> None:
     """Random Forest-only pipeline with hyperparameter and threshold search."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     logger.info(
         "RF-only pipeline | fast=%s | param_iter=%d | thr_grid=%d",
         cfg.fast_mode, cfg.param_search_iter, len(cfg.threshold_grid),
     )
 
-    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
-    X_train, y_train, X_test = load_project_data(data_dir=data_dir)
+    X_train, y_train, X_test = load_project_data()
     y = y_train.iloc[:, 0]
 
     selector = ProfitDrivenFeatureSelector(**cfg.selector_kwargs)
@@ -85,7 +93,7 @@ def main() -> None:
         final.predict_proba(X_te)[:, 1], threshold=best_threshold, max_offers=cfg.max_offers,
     )
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     write_submission(top_indices + 1, features, project_root, cfg.team_name, suffix="rf_only")
 
 

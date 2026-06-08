@@ -19,23 +19,13 @@ from sklearn.svm import SVC
 from .config import Config
 from .feature_selection import ProfitDrivenFeatureSelector
 from .run_optimization import tune_hgb_for_profit
-from .utils import calibrate, cv_splits, write_submission, load_project_data, select_offer_indices
+from .utils import calibrate, cv_splits, load_project_data, select_offer_indices, write_submission
 
 cfg = Config()
 
-log_file = os.path.join(os.path.dirname(__file__), "..", "experiments.log")
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.FileHandler(log_file, mode="a"),
-        logging.StreamHandler(sys.stdout),
-    ],
-)
 logger = logging.getLogger("experiments")
 
-# Decision threshold derived from uniform class priors — a neutral starting point.
+# Decision threshold at the break-even point for uniform class priors.
 _PROFIT_THRESHOLD = 1.0 / 3.0
 
 EXPERIMENTS = [
@@ -86,6 +76,16 @@ def run_experiment(
 
 def main() -> None:
     """Compare feature-selection configs, then train a final ensemble on the winner."""
+    log_file = os.path.join(os.path.dirname(__file__), "..", "experiments.log")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.FileHandler(log_file, mode="a"),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
     X_train, y_train, X_test = load_project_data(data_dir=data_dir)
     y = y_train.iloc[:, 0]

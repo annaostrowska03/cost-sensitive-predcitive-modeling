@@ -24,7 +24,7 @@ def safe_ratio(
     denominator: npt.ArrayLike,
     epsilon: float = _RATIO_EPSILON,
 ) -> np.ndarray:
-    """Numerically stable ratio — small denominators are clamped to *epsilon*."""
+    """Numerically stable ratio; small denominators are clamped to *epsilon*."""
     d = np.asarray(denominator)
     d = np.where(np.abs(d) < epsilon, epsilon, d)
     return np.asarray(numerator) / d

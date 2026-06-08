@@ -1,3 +1,10 @@
+"""4-stage profit-driven feature selection pipeline.
+
+Implements ProfitDrivenFeatureSelector, a sequential funnel that reduces
+500 raw variables to a small cost-effective subset using correlation
+filtering, RF importance, embedded RF re-ranking, and Sequential Forward
+Selection driven by cross-validated profit.
+"""
 from __future__ import annotations
 
 import logging
@@ -20,15 +27,15 @@ class ProfitDrivenFeatureSelector:
 
     Stages
     ------
-    0. Correlation filter — drops one variable from each pair whose
+    0. Correlation filter: drops one variable from each pair whose
        |Spearman r| exceeds *corr_threshold*.
-    1. Filter — keeps the top-n features by Random Forest importance.
-    2. Embedded — re-ranks survivors with a deeper RF and retains at most
+    1. Filter: keeps the top-n features by Random Forest importance.
+    2. Embedded: re-ranks survivors with a deeper RF, retains at most
        *embedded_target_n* features.
-    3. Wrapper — Sequential Forward Selection driven by repeated stratified
-        CV profit, stopping when adding any further variable reduces expected
-        score.  Profit is evaluated in ranking mode (threshold = −∞) to avoid
-        threshold-optimisation bias during feature selection.
+    3. Wrapper: Sequential Forward Selection driven by repeated stratified
+       CV profit, stopping when adding any further variable reduces expected
+       score. Profit is evaluated in ranking mode (threshold = -inf) to avoid
+       threshold-optimisation bias during feature selection.
     """
 
     def __init__(
@@ -69,7 +76,7 @@ class ProfitDrivenFeatureSelector:
 
         if not self.selected_features_:
             logger.warning(
-                "No features selected — using any variable costs more than it earns."
+                "No features selected - using any variable costs more than it earns."
             )
         logger.info("Pipeline done. Features: %s", self.selected_features_)
         logger.info("Expected CV profit: %.2f EUR", self.expected_profit_)
@@ -113,7 +120,7 @@ class ProfitDrivenFeatureSelector:
         top_idx = np.argsort(imp)[::-1][: self.embedded_target_n]
         best = [candidates[i] for i in top_idx if imp[i] > 0]
 
-        # Fallback: degenerate forest — take the top slice regardless of zero importances.
+        # Fallback: degenerate forest - take the top slice regardless of zero importances.
         if len(best) < self.embedded_target_n and len(best) < len(candidates):
             best = [candidates[i] for i in top_idx][: self.embedded_target_n]
 
@@ -129,7 +136,9 @@ class ProfitDrivenFeatureSelector:
             self.sfs_n_repeats, self.sfs_cv_folds,
         )
 
-        best_profit = -np.inf
+        # Baseline: zero profit (no customers targeted, no variable cost).
+        # A feature is added only if it strictly increases expected profit.
+        best_profit = 0.0
         current: list[str] = []
         available = list(candidates)
 
@@ -148,7 +157,7 @@ class ProfitDrivenFeatureSelector:
                 logger.info("Added '%s' | CV profit: %.0f EUR", top_feat, best_profit)
             else:
                 logger.info(
-                    "Optimum reached — '%s' would reduce profit to %.0f EUR.",
+                    "Optimum reached - '%s' would reduce profit to %.0f EUR.",
                     top_feat, best_candidate_profit,
                 )
                 break

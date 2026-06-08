@@ -1,35 +1,41 @@
+"""Free feature engineering experiment.
+
+Tests whether derived features (PCA components, K-means distances,
+pairwise products and ratios) improve profit over the raw selected variables.
+"""
 from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 
 from ..config import Config
-from ..data_loader import load_project_data
-from ..evaluation import select_offer_indices
 from ..feature_selection import ProfitDrivenFeatureSelector
-from ..free_feature_engineering import build_free_engineered_features
-from ..utils import find_best_threshold, logistic_pipeline, oof_predict_proba, write_submission
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+from ..utils import (
+    find_best_threshold,
+    load_project_data,
+    logistic_pipeline,
+    oof_predict_proba,
+    select_offer_indices,
+    write_submission,
 )
+from .free_feature_engineering import build_free_engineered_features
+
 logger = logging.getLogger(__name__)
 
 cfg = Config()
 
 
-def _candidate_factories() -> dict[str, callable]:
+def _candidate_factories() -> dict[str, Callable[[], object]]:
     """Model factories for the free-feature-engineering comparison.
 
     ``hgb_base`` runs on the original 6 selected features to isolate how much
     the engineered space helps.  All other models run on the full engineered set.
     ``hgb_cautious`` is more regularised; ``hgb_expressive`` allows deeper trees.
     """
-    factories: dict[str, callable] = {
+    factories: dict[str, Callable[[], object]] = {
         "hgb_base": lambda: HistGradientBoostingClassifier(
             random_state=cfg.random_state, max_iter=240, learning_rate=0.05,
             min_samples_leaf=20, max_leaf_nodes=63,
@@ -57,13 +63,17 @@ def _candidate_factories() -> dict[str, callable]:
 
 def main() -> None:
     """Free feature engineering experiment: derived features vs. base model."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     logger.info(
         "interactions pipeline | fast=%s | pca=%d | clusters=%d | thr_grid=%d",
         cfg.fast_mode, cfg.pca_components, cfg.cluster_count, len(cfg.threshold_grid),
     )
 
-    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
-    X_train, y_train, X_test = load_project_data(data_dir=data_dir)
+    X_train, y_train, X_test = load_project_data()
     y = y_train.iloc[:, 0]
 
     selector = ProfitDrivenFeatureSelector(**cfg.selector_kwargs)
@@ -114,7 +124,7 @@ def main() -> None:
         max_offers=cfg.max_offers,
     )
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     write_submission(top_indices + 1, features, project_root, cfg.team_name, suffix="interactions")
 
 

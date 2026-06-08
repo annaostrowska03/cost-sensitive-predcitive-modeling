@@ -20,6 +20,9 @@ notebooks = [
     "jupyter>=1.0",
     "ipykernel>=6.0",
 ]
+lgbm = [
+    "lightgbm>=4.0",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.4",
