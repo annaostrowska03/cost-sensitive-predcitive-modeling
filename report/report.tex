@@ -45,9 +45,9 @@ penalises both false contacts ($-$5 EUR) and data acquisition (200 EUR per varia
 making standard accuracy-driven feature selection fundamentally unsuitable. We propose a
 four-stage profit-driven feature selector that reduces 500 input variables to four, complemented
 by nested cross-validation for unbiased evaluation and a threshold optimised directly against the
-business objective. Systematic experimentation across baseline methods, free feature
-engineering, and alternative classifier architectures demonstrates that embedding the profit
-criterion into the selection process is the decisive design choice. The resulting pipeline
+business objective. Experiments across baseline methods, free feature engineering, and alternative classifier
+architectures show that embedding the profit criterion directly into the selection process
+is the key design choice. The resulting pipeline
 achieves an out-of-fold cross-validated score of \textbf{5\,165 EUR} and targets all 1\,000
 available campaign slots.
 \end{abstract}
@@ -73,9 +73,9 @@ top~1\,000, since ranking by expected gain is equivalent to ranking by probabili
 
 \textbf{Cost-Benefit Analysis of Feature Selection}
 
-Our cost-benefit analysis demonstrates that the high penalty of 200 EUR per variable significantly impacts the optimal model complexity. For any new feature to be economically viable, it must independently generate at least 20 additional True Positives without increasing the False Positive rate (20 TP $\times$ 10 EUR = 200 EUR). 
+The 200 EUR penalty per variable has a large impact on model complexity. For a new feature to break even, it must independently yield at least 20 extra true positives (20 TP $\times$ 10 EUR = 200 EUR), which is a high bar given the noise level in this dataset.
 
-During our experiments, we observed that due to the high noise level in the dataset, adding further variables failed to offset their acquisition costs. Consequently, the most profitable strategy dictates an extreme dimensionality reduction, justifying our decision to rely on a highly restricted feature set to maximize the net campaign revenue.
+In our experiments, adding variables beyond four consistently reduced net profit. This points to a very compact feature set as the optimal strategy.
 
 \section{Data and Exploratory Analysis}
 
@@ -121,7 +121,7 @@ intensive wrapper stage (Figure~\ref{fig:pipeline}).
 \draw[arr] (s2) -- (s3);
 \draw[arr] (s3) -- (out);
 \node[below=0.12cm of s0, font=\scriptsize, color=gray] {500 $\to$ $\sim$490};
-\node[below=0.12cm of s1, font=\scriptsize, color=gray] {$\to$ 50};
+\node[below=0.12cm of s1, font=\scriptsize, color=gray] {$\to$ 55};
 \node[below=0.12cm of s2, font=\scriptsize, color=gray] {$\to$ 15};
 \node[below=0.12cm of s3, font=\scriptsize, color=gray] {$\to$ optimal};
 \end{tikzpicture}
@@ -155,19 +155,19 @@ variable cost term). The 200 EUR penalty is applied per added feature.
 The feature $f^* = \arg\max_f \Delta_t(f)$ is added to $\mathcal{F}_t$ if $\Delta_t(f^*)>0$;
 otherwise the procedure terminates.
 
-\subsection{Probability Calibration and Threshold Optimisation}
+\subsection{Threshold Optimisation}
 
-Tree ensembles are known to produce overconfident probability estimates near 0 and 1.
-Since the profit function is threshold-sensitive, we apply Platt (sigmoid) calibration on
-held-out CV folds to improve the reliability of predicted probabilities.
-
-After model training, the decision threshold $\tau$ is optimised by grid search over
-$\mathcal{T} = \{0.15,\, 0.15 + \Delta\tau,\, \ldots,\, 0.50\}$ with 36 equally spaced points:
+The decision threshold $\tau$ is optimised by grid search over
+$\mathcal{T} = \{0.15,\, 0.15 + \Delta\tau,\, \ldots,\, 0.50\}$ with 36 equally spaced points
+directly on the out-of-fold predictions:
 \begin{equation}
     \tau^* = \arg\max_{\tau \in \mathcal{T}}\; [10\cdot\mathrm{TP}(\tau) - 5\cdot\mathrm{FP}(\tau)].
     \label{eq:threshold}
 \end{equation}
 The feature cost $200K$ is constant w.r.t.\ $\tau$ and does not affect the optimal threshold.
+Because the threshold is calibrated directly on the raw OOF probability scores, the final model
+is intentionally left uncalibrated so that the score distribution at inference time matches the
+one seen during threshold selection.
 
 \subsection{Ensemble Construction and Model Comparison}
 
@@ -176,11 +176,14 @@ randomised search over learning rate, maximum leaf count, minimum leaf size, boo
 iterations, and $\ell_2$ regularisation, scoring each candidate by out-of-fold CV profit.
 We then compare two final strategies on OOF predictions:
 \begin{itemize}
-    \item \emph{HGB-only:} best-tuned HGB model with sigmoid calibration.
-    \item \emph{Soft-voting ensemble:} tuned HGB ($w = 0.55$), Random Forest ($w = 0.30$),
-          and $\ell_2$-regularised Logistic Regression ($w = 0.15$).
+    \item \emph{HGB-only:} best-tuned HGB model, applied directly without probability calibration
+          so that threshold selection and final scoring use the same score distribution.
+    \item \emph{Profit-proportional soft-voting ensemble:} HGB, Random Forest, and
+          $\ell_2$-regularised Logistic Regression, each weighted proportionally to its
+          standalone OOF CV profit (yielding approximately $w_\text{HGB}{=}0.55$,
+          $w_\text{RF}{=}0.30$, $w_\text{LR}{=}0.15$ in our experiments).
 \end{itemize}
-The strategy with higher CV profit is retained.
+The strategy with higher OOF CV profit is retained.
 
 \section{Experiments}
 
