@@ -112,19 +112,19 @@ The gap reflects leakage from Stages 1–2 being supervised on the full dataset.
 ├── results/                  # old submission variants and experiment CSVs
 ├── src/
 │   ├── config.py             # all env-var config in one place
-│   ├── data_loader.py
-│   ├── evaluation.py         # calculate_profit, select_offer_indices
 │   ├── feature_selection.py  # 4-stage ProfitDrivenFeatureSelector
-│   ├── free_feature_engineering.py
 │   ├── run_optimization.py   # main pipeline entry point
 │   ├── run_experiments.py    # multi-config sweep
-│   ├── utils.py              # shared helpers
+│   ├── utils.py              # shared helpers, dataloaders and evaluation functions
 │   ├── visualization.py
 │   └── experiments/          # alternative pipeline variants
+│       ├── free_feature_engineering.py
 │       ├── run_optimization_ensemble.py
 │       ├── run_optimization_interactions.py
 │       ├── run_optimization_max_profit.py
 │       ├── run_optimization_rf_only.py
+│       ├── feature_combo_search.py
+│       ├── submit_best_combo.py
 │       └── run_optimization_threshold_search.py
 ├── ids_obs.txt               # current submission — customer indices
 ├── ids_vars.txt              # current submission — variable indices
